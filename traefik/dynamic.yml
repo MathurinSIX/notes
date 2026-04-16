@@ -1,0 +1,33 @@
+# Legacy file-based Traefik routes (unused when using Docker provider in docker-compose.traefik.yml).
+# Kept for reference or a minimal Traefik setup without the Docker socket.
+# Service hostnames match Compose service names on traefik-public.
+http:
+  routers:
+    frontend-http:
+      rule: Host(`localhost`)
+      entryPoints:
+        - http
+      service: frontend-svc
+    backend-http:
+      rule: Host(`backend.localhost`)
+      entryPoints:
+        - http
+      service: backend-svc
+    grafana-http:
+      rule: Host(`grafana.localhost`)
+      entryPoints:
+        - http
+      service: grafana-svc
+  services:
+    frontend-svc:
+      loadBalancer:
+        servers:
+          - url: http://frontend:3000
+    backend-svc:
+      loadBalancer:
+        servers:
+          - url: http://backend:8000
+    grafana-svc:
+      loadBalancer:
+        servers:
+          - url: http://grafana:3000

@@ -1,0 +1,86 @@
+# Traefik routing and optional bundled Traefik. Merge after `docker-compose.yml`.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.traefik.yml up -d
+#   just up-dev   or   just up-dev bundled
+#
+# Expects DOMAIN (see `.env.development.example` / `.env.development`) for Host(...) rules and external Docker network traefik-public
+# (`docker network create traefik-public`). External Traefik must join that network, e.g.
+#   docker network connect traefik-public <traefik-container-name>
+#
+# HTTP routers use Traefik entrypoint `web` (bundled proxy and external Traefik must define it, e.g. port 80).
+# Postgres stays off Traefik; use POSTGRES_PORT on the `db` service for host access (loopback).
+services:
+  proxy:
+    profiles:
+      - bundled-traefik
+    # v3.6+ negotiates Docker API version (required for Docker Engine 29+).
+    image: traefik:v3.6
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - "80:80"
+      - "8090:8080"
+    command:
+      - --providers.docker
+      - --providers.docker.constraints=Label(`traefik.constraint-label`, `traefik-public`)
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --accesslog
+      - --log
+      - --log.level=INFO
+      - --api
+      - --api.insecure=true
+    labels:
+      - traefik.enable=true
+      - traefik.constraint-label=traefik-public
+    networks:
+      - traefik-public
+      - default
+
+  backend:
+    networks:
+      - traefik-public
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=${TRAEFIK_DOCKER_NETWORK:-traefik-public}
+      - traefik.constraint-label=traefik-public
+      - traefik.http.services.tool-template-backend.loadbalancer.server.port=8000
+      - traefik.http.routers.tool-template-backend-http.rule=Host(`backend.${DOMAIN:-localhost}`)
+      - traefik.http.routers.tool-template-backend-http.entrypoints=web
+
+  frontend:
+    networks:
+      - traefik-public
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=${TRAEFIK_DOCKER_NETWORK:-traefik-public}
+      - traefik.constraint-label=traefik-public
+      - traefik.http.services.tool-template-frontend.loadbalancer.server.port=3000
+      - traefik.http.routers.tool-template-frontend-http.rule=Host(`${DOMAIN:-localhost}`)
+      - traefik.http.routers.tool-template-frontend-http.entrypoints=web
+
+  storage:
+    networks:
+      - traefik-public
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=${TRAEFIK_DOCKER_NETWORK:-traefik-public}
+      - traefik.constraint-label=traefik-public
+      - traefik.http.services.tool-template-storage-api.loadbalancer.server.port=9000
+      - traefik.http.routers.tool-template-storage-api-http.rule=Host(`storage.${DOMAIN:-localhost}`)
+      - traefik.http.routers.tool-template-storage-api-http.entrypoints=web
+      - traefik.http.services.tool-template-storage-console.loadbalancer.server.port=9001
+      - traefik.http.routers.tool-template-storage-console-http.rule=Host(`storage-console.${DOMAIN:-localhost}`)
+      - traefik.http.routers.tool-template-storage-console-http.entrypoints=web
+
+  grafana:
+    networks:
+      - traefik-public
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=${TRAEFIK_DOCKER_NETWORK:-traefik-public}
+      - traefik.constraint-label=traefik-public
+      - traefik.http.services.tool-template-grafana.loadbalancer.server.port=3000
+      - traefik.http.routers.tool-template-grafana-http.rule=Host(`grafana.${DOMAIN:-localhost}`)
+      - traefik.http.routers.tool-template-grafana-http.entrypoints=web

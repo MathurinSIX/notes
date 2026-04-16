@@ -1,0 +1,15 @@
+node_modules/
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+.idea*
+*provider_credentials*
+*project_config*
+*.env.grafana
+.env
+.env.development
+.env.production
+.next/
+downloads/
+__pycache__/

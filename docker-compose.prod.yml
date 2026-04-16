@@ -1,0 +1,96 @@
+# Production-style stack: built images + Traefik only. Postgres and S3/MinIO are external.
+# Configure hosts and credentials in `.env` (see `.env.example`).
+# Start: `just up` (uses `--env-file .env` and `-p tool_template_prod` for compose interpolation).
+#
+# Frontend: image `target: runner` runs `vite build` at image build time (no bind mounts, no Vite
+# dev/watch). Runtime is `serve` on port 3000. Pass `VITE_API_URL` via `.env` for compose build args.
+#
+# Traefik routing mirrors `docker-compose.traefik.yml` for backend/frontend; keep in sync if labels change.
+
+services:
+  proxy:
+    profiles:
+      - bundled-traefik
+    image: traefik:v3.6
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - "80:80"
+      - "8090:8080"
+    command:
+      - --providers.docker
+      - --providers.docker.constraints=Label(`traefik.constraint-label`, `traefik-public`)
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --accesslog
+      - --log
+      - --log.level=INFO
+      - --api
+      - --api.insecure=true
+    labels:
+      - traefik.enable=true
+      - traefik.constraint-label=traefik-public
+    networks:
+      - traefik-public
+      - default
+
+  backend:
+    restart: unless-stopped
+    build:
+      context: ./backend
+    networks:
+      - default
+      - traefik-public
+    env_file:
+      - .env
+    # Dev compose sets these explicitly; prod must too or CORS defaults to localhost:3000 and
+    # the browser blocks login from http(s)://${DOMAIN} (failed fetch → generic sign-in error).
+    environment:
+      - DOMAIN=${DOMAIN}
+      - HOSTNAME=${HOSTNAME:-}
+      - FRONTEND_HOST=${FRONTEND_HOST:-http://${DOMAIN}}
+      - BACKEND_CORS_ORIGINS=${BACKEND_CORS_ORIGINS:-http://${DOMAIN},http://backend.${DOMAIN}}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=${TRAEFIK_DOCKER_NETWORK:-traefik-public}
+      - traefik.constraint-label=traefik-public
+      - traefik.http.services.tool-template-backend.loadbalancer.server.port=8000
+      - traefik.http.routers.tool-template-backend-http.rule=Host(`backend.${DOMAIN}`)
+      - traefik.http.routers.tool-template-backend-http.entrypoints=web
+
+  frontend:
+    image: tool-template-frontend-prod
+    restart: unless-stopped
+    # Multi-stage Dockerfile: builder = `vite build`; runner = static `dist` + `serve` (not `target: dev`).
+    build:
+      context: ./frontend
+      target: runner
+      args:
+        VITE_API_URL: ${VITE_API_URL}
+    networks:
+      - default
+      - traefik-public
+    env_file:
+      - .env
+    environment:
+      - HOSTNAME=0.0.0.0
+      - PORT=3000
+      - NODE_ENV=production
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=${TRAEFIK_DOCKER_NETWORK:-traefik-public}
+      - traefik.constraint-label=traefik-public
+      - traefik.http.services.tool-template-frontend.loadbalancer.server.port=3000
+      - traefik.http.routers.tool-template-frontend-http.rule=Host(`${DOMAIN}`)
+      - traefik.http.routers.tool-template-frontend-http.entrypoints=web
+
+networks:
+  traefik-public:
+    name: traefik-public
+    external: true

@@ -1,0 +1,186 @@
+# Local Docker stack (dev-style): UI at http://${DOMAIN}, API at http://backend.${DOMAIN}
+# via Traefik (`docker-compose.traefik.yml`). App ports stay internal; Postgres is published on loopback
+# as POSTGRES_PORT (host) -> 5432 (container). Services use POSTGRES_PORT=5432 to reach `db` on the network.
+# External network `traefik-public` (`just up-dev` creates it). `prestart` runs once
+# before `backend`. Use `just up-dev` (loads `.env.development`) or the same compose files with
+# `-p tool_template_dev` so dev does not share project/volumes/images with production (`just up`).
+
+services:
+  db:
+    image: pgvector/pgvector:pg12
+    restart: on-failure
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER?Variable not set} -d ${POSTGRES_DB?Variable not set}"]
+      interval: 10s
+      retries: 5
+      start_period: 30s
+      timeout: 10s
+    volumes:
+      - pg:/var/lib/postgresql/data/pgdata
+    env_file:
+      - .env.development
+    environment:
+      - PGDATA=/var/lib/postgresql/data/pgdata
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD?Variable not set}
+      - POSTGRES_USER=${POSTGRES_USER?Variable not set}
+      - POSTGRES_DB=${POSTGRES_DB?Variable not set}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    networks:
+      - default
+
+  storage:
+    image: minio/minio:latest
+    restart: on-failure
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    volumes:
+      - storage:/data
+    networks:
+      - default
+
+  storage-init:
+    image: minio/mc:latest
+    restart: "no"
+    depends_on:
+      - storage
+    env_file:
+      - .env.development
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        attempt=0
+        until mc alias set local http://storage:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" 2>/dev/null; do
+          attempt=$$((attempt + 1))
+          if [ "$$attempt" -ge 60 ]; then exit 1; fi
+          sleep 1
+        done
+        mc mb "local/$$BUCKET_NAME" --ignore-existing
+    networks:
+      - default
+
+  prestart:
+    build:
+      context: ./backend
+    restart: "no"
+    networks:
+      - default
+    depends_on:
+      db:
+        condition: service_healthy
+        restart: true
+    command: bash scripts/prestart.sh
+    env_file:
+      - .env.development
+    environment:
+      - DOMAIN=${DOMAIN:-localhost}
+      - HOSTNAME=${HOSTNAME:-}
+      - BUCKET_URL=http://storage:9000
+      - SECRET_KEY=${SECRET_KEY?Variable not set}
+      - POSTGRES_SERVER=db
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=${POSTGRES_DB?Variable not set}
+      - POSTGRES_USER=${POSTGRES_USER?Variable not set}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD?Variable not set}
+
+  backend:
+    restart: unless-stopped
+    build:
+      context: ./backend
+    networks:
+      - default
+    depends_on:
+      db:
+        condition: service_healthy
+        restart: true
+      prestart:
+        condition: service_completed_successfully
+    env_file:
+      - .env.development
+    environment:
+      - DOMAIN=${DOMAIN:-localhost}
+      - HOSTNAME=${HOSTNAME:-}
+      - FRONTEND_HOST=http://${DOMAIN:-localhost}
+      - BACKEND_CORS_ORIGINS=http://${DOMAIN:-localhost},http://backend.${DOMAIN:-localhost},http://grafana.${DOMAIN:-localhost}
+      - BUCKET_URL=http://storage:9000
+      - SECRET_KEY=${SECRET_KEY?Variable not set}
+      - POSTGRES_SERVER=db
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=${POSTGRES_DB?Variable not set}
+      - POSTGRES_USER=${POSTGRES_USER?Variable not set}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD?Variable not set}
+    volumes:
+      - ./backend:/app
+      - backend_venv:/app/.venv
+    command: ["bash", "-c", "uv sync && cd app && uvicorn main:app --host 0.0.0.0 --port 8000 --reload"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  frontend:
+    image: tool-template-frontend-dev
+    restart: unless-stopped
+    networks:
+      - default
+    env_file:
+      - .env.development
+    environment:
+      - DOMAIN=${DOMAIN:-localhost}
+      - HOSTNAME=0.0.0.0
+      - PORT=3000
+      - NODE_ENV=development
+      - VITE_API_URL=http://backend.${DOMAIN:-localhost}
+    volumes:
+      - ./frontend:/app
+      - frontend_dev_node_modules:/app/node_modules
+    command: ["sh", "-c", "npm install && npm run dev"]
+    build:
+      context: ./frontend
+      target: dev
+
+  grafana:
+    restart: on-failure
+    build:
+      context: ./grafana
+    volumes:
+      - ./grafana/grafana.ini:/etc/grafana/grafana.ini
+    depends_on:
+      db:
+        condition: service_healthy
+        restart: true
+    networks:
+      - default
+    env_file:
+      - .env.development
+    environment:
+      - DOMAIN=${DOMAIN:-localhost}
+      - POSTGRES_SERVER=db
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_SCHEMA=${POSTGRES_SCHEMA}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - GF_SERVER_ROOT_URL=${GF_SERVER_ROOT_URL:-http://grafana.${DOMAIN:-localhost}/}
+      - GF_AUTH_LOGIN_COOKIE_NAME=grafana_session
+      - GF_AUTH_COOKIE_DOMAIN=.${DOMAIN:-localhost}
+      - GF_AUTH_DISABLE_LOGIN_FORM=false
+      - GF_USERS_AUTO_ASSIGN_ORG=true
+      - GF_SECURITY_ADMIN_PASSWORD=${FIRST_SUPERUSER_PASSWORD:-admin}
+
+volumes:
+  pg:
+  storage:
+  frontend_dev_node_modules:
+  backend_venv:
+
+networks:
+  traefik-public:
+    name: traefik-public
+    external: true
