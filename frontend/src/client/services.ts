@@ -106,7 +106,7 @@ export class LoginService {
 	}
 
 	/**
-	 * Login with email and password (OAuth2 password flow: form field ``username`` is email).
+	 * Login with username and password (OAuth2 password flow: form field ``username``).
 	 * @returns Token Successful Response
 	 * @throws ApiError
 	 */
@@ -124,7 +124,7 @@ export class LoginService {
 			body,
 			mediaType: "application/x-www-form-urlencoded",
 			errors: {
-				401: "Incorrect email or password",
+				401: "Incorrect username or password",
 				422: "Validation Error",
 			},
 		})

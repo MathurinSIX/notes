@@ -323,10 +323,11 @@ export const $Token = {
 
 export const $UserCreate = {
 	properties: {
-		email: {
+		username: {
 			type: "string",
 			isRequired: true,
-			format: "email",
+			maxLength: 255,
+			minLength: 1,
 		},
 		full_name: {
 			type: "any-of",
@@ -383,12 +384,13 @@ export const $UserOut = {
 
 export const $UserUpdate = {
 	properties: {
-		email: {
+		username: {
 			type: "any-of",
 			contains: [
 				{
 					type: "string",
-					format: "email",
+					maxLength: 255,
+					minLength: 1,
 				},
 				{
 					type: "null",

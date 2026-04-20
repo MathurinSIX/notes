@@ -36,9 +36,9 @@ class LoginRepository(BaseRepository):
         self.session: SessionDep = session
         self.current_user = None  # type: ignore
 
-    async def read_by_email(self, email: str, bypass_rls: bool = False):
+    async def read_by_username(self, username: str, bypass_rls: bool = False):
         statement = select(self.model).where(
-            self.model.email == email,  # type: ignore
+            self.model.username == username,  # type: ignore
             True
             if bypass_rls
             else or_(

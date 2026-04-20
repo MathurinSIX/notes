@@ -62,7 +62,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="My Project",
+    title="Notes",
     openapi_url="/openapi.json",
     generate_unique_id_function=custom_generate_unique_id,
     lifespan=lifespan,

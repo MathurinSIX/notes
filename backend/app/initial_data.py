@@ -12,29 +12,31 @@ logger = logging.getLogger(__name__)
 
 
 def init() -> None:
-    email = (settings.FIRST_SUPERUSER_EMAIL or "").strip()
+    username = (settings.FIRST_SUPERUSER_USERNAME or "").strip()
     password = (settings.FIRST_SUPERUSER_PASSWORD or "").strip()
     if not password:
         logger.info("Skipping seed user (FIRST_SUPERUSER_PASSWORD not set)")
         return
-    if not email:
-        logger.info("Skipping seed user (FIRST_SUPERUSER_EMAIL empty)")
+    if not username:
+        logger.info("Skipping seed user (FIRST_SUPERUSER_USERNAME empty)")
         return
 
     with Session(engine) as session:
-        existing = session.exec(select(User).where(User.email == email)).first()
+        existing = session.exec(
+            select(User).where(User.username == username)
+        ).first()
         if existing:
-            logger.info("Seed user already exists: %s", email)
+            logger.info("Seed user already exists: %s", username)
             return
         user = User(
-            email=email,
+            username=username,
             hashed_password=security.get_password_hash(password),
             is_superuser=True,
             is_active=True,
         )
         session.add(user)
         session.commit()
-        logger.info("Created seed superuser: %s", email)
+        logger.info("Created seed superuser: %s", username)
 
 
 def main() -> None:

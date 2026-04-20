@@ -11,8 +11,8 @@
 root := justfile_directory()
 compose_dev := "-f " + root + "/docker-compose.yml -f " + root + "/docker-compose.traefik.yml"
 compose_prod := "-f " + root + "/docker-compose.prod.yml"
-compose_project_dev := "-p tool_template_dev"
-compose_project_prod := "-p tool_template_prod"
+compose_project_dev := "-p notes_dev"
+compose_project_prod := "-p notes_prod"
 
 [group('help')]
 default:

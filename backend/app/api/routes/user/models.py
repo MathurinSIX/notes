@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from pydantic import EmailStr
+from sqlalchemy import Column, String
 from sqlmodel import Field, SQLModel
 
 
@@ -9,7 +9,11 @@ class User(SQLModel, table=True):
     __tablename__ = "user"
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    email: EmailStr = Field(unique=True, index=True, max_length=255)
+    # DB column remains ``email`` from the initial migration; API and code use ``username``.
+    username: str = Field(
+        max_length=255,
+        sa_column=Column("email", String(255), nullable=False, unique=True),
+    )
     hashed_password: str | None = Field(default=None, max_length=255)
     full_name: str | None = Field(default=None, max_length=255)
     is_active: bool = True

@@ -8,11 +8,11 @@ export function ProjectLogo({ className }: ProjectLogoProps) {
 	return (
 		<span
 			className={cn(
-				"inline-block bg-gradient-to-r from-violet-600 via-fuchsia-500 to-sky-500 bg-clip-text font-bold text-xl tracking-tight text-transparent dark:from-violet-400 dark:via-fuchsia-400 dark:to-sky-400",
+				"inline-block bg-gradient-to-r from-amber-600 via-yellow-500 to-amber-400 bg-clip-text font-semibold text-lg tracking-tight text-transparent dark:from-yellow-300 dark:via-amber-300 dark:to-yellow-200",
 				className,
 			)}
 		>
-			My project
+			Notes
 		</span>
 	)
 }

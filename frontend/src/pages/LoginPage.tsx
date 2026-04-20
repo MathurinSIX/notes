@@ -4,12 +4,12 @@ import { ProjectLogo } from "@/components/ProjectLogo"
 import { Button } from "@/components/ui/button"
 import { ensureLoggedIn, setTokens } from "@/hooks/useAuth"
 import { cn } from "@/lib/utils"
-import { useEffect, useState } from "react"
 import { useNavigate } from "@tanstack/react-router"
+import { useEffect, useState } from "react"
 
 export function LoginPage() {
 	const [mounted, setMounted] = useState(false)
-	const [email, setEmail] = useState("")
+	const [username, setUsername] = useState("")
 	const [password, setPassword] = useState("")
 	const [error, setError] = useState<string | null>(null)
 	const [submitting, setSubmitting] = useState(false)
@@ -19,7 +19,7 @@ export function LoginPage() {
 		setMounted(true)
 		ensureLoggedIn().then((loggedIn) => {
 			if (loggedIn) {
-				navigate({ to: "/" })
+				navigate({ to: "/notes" })
 			}
 		})
 	}, [navigate])
@@ -30,14 +30,14 @@ export function LoginPage() {
 		setSubmitting(true)
 		try {
 			const token = await LoginService.loginAccessToken({
-				username: email.trim(),
+				username: username.trim(),
 				password,
 			})
 			setTokens(token.access_token, token.refresh_token)
-			navigate({ to: "/" })
+			navigate({ to: "/notes" })
 		} catch (e) {
 			if (e instanceof ApiError && e.status === 401) {
-				setError("Incorrect email or password.")
+				setError("Incorrect username or password.")
 			} else if (e instanceof ApiError) {
 				setError(
 					`Sign-in failed (HTTP ${e.status}). Check that the backend is running and reachable.`,
@@ -75,12 +75,12 @@ export function LoginPage() {
 						<ProjectLogo className="text-2xl md:text-3xl" />
 					</div>
 					<input
-						type="email"
-						name="email"
-						autoComplete="email"
-						placeholder="Email"
-						value={email}
-						onChange={(e) => setEmail(e.target.value)}
+						type="text"
+						name="username"
+						autoComplete="username"
+						placeholder="Username"
+						value={username}
+						onChange={(e) => setUsername(e.target.value)}
 						className={inputClassName}
 						required
 					/>

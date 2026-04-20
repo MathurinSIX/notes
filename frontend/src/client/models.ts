@@ -66,7 +66,7 @@ export type Token = {
 }
 
 export type UserCreate = {
-	email: string
+	username: string
 	password?: string | null
 	full_name?: string | null
 	is_active?: boolean
@@ -81,7 +81,7 @@ export type UserOut = {
 }
 
 export type UserUpdate = {
-	email?: string | null
+	username?: string | null
 	full_name?: string | null
 }
 

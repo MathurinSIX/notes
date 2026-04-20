@@ -1,4 +1,4 @@
-# My Project
+# Notes
 
 Full-stack template with a **FastAPI** backend and a **Vite** + **React** frontend.
 
@@ -6,7 +6,7 @@ Full-stack template with a **FastAPI** backend and a **Vite** + **React** fronte
 
 This repository is a **production-style starter** for building web apps on GitLab: a typed REST API, PostgreSQL with Alembic migrations, Docker Compose for local development (Traefik routing, optional MinIO and Grafana), and a React SPA with TanStack Router and Radix-based UI. The backend follows a small **domain module layout** (models, repository, service, schemas, routes) and uses **repository-level row-level security** hooks so multi-tenant style access rules stay next to the data layer.
 
-The frontend ships with **email and password sign-in**, a shell layout (header, settings, breadcrumbs), and an **example “summarize” workflow**: submit text, the backend records runs and steps, and the home page lists run status and outputs—useful as a pattern for long-running jobs or pipelines. From here you replace branding, routes, and domains with your product while keeping the same deployment and migration workflow.
+The frontend ships with **email and password sign-in**, a shell layout (header, settings, breadcrumbs), and **notes with drafts** (list notes, open a note, start a draft from the header). From here you replace branding, routes, and domains with your product while keeping the same deployment and migration workflow.
 
 ### Screenshots
 
@@ -16,9 +16,9 @@ Illustrative screenshots of the bundled screens; swap in your own captures from 
 
 ![Sign-in page](docs/screenshots/login.png)
 
-**Home** — welcome view with the example summarize form and runs table (status badges update while workflows run).
+**Notes** — signed-in list of notes with a shortcut to create a new note.
 
-![Home page with example workflow and runs table](docs/screenshots/home.png)
+![Notes list](docs/screenshots/notes.png)
 
 ---
 

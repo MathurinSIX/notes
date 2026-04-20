@@ -6,8 +6,10 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from pydantic import (
+    AliasChoices,
     AnyUrl,
     BeforeValidator,
+    Field,
     PostgresDsn,
     computed_field,
     model_validator,
@@ -58,9 +60,16 @@ class Settings(BaseSettings):
     )
     SECRET_KEY: str = "changethis"
 
-    # Seed superuser (created on prestart if no user with this email exists).
+    # Seed superuser (created on prestart if no user with this username exists).
     # Password must be set in the environment (e.g. .env); no default secret.
-    FIRST_SUPERUSER_EMAIL: str = "admin@localhost"
+    # ``FIRST_SUPERUSER_EMAIL`` is still accepted for older env files.
+    FIRST_SUPERUSER_USERNAME: str = Field(
+        default="admin",
+        validation_alias=AliasChoices(
+            "FIRST_SUPERUSER_USERNAME",
+            "FIRST_SUPERUSER_EMAIL",
+        ),
+    )
     FIRST_SUPERUSER_PASSWORD: str | None = None
 
     HOSTNAME: str | None = None

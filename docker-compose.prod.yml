@@ -1,6 +1,6 @@
 # Production-style stack: built images + Traefik only. Postgres and S3/MinIO are external.
 # Configure hosts and credentials in `.env` (see `.env.example`).
-# Start: `just up` (uses `--env-file .env` and `-p tool_template_prod` for compose interpolation).
+# Start: `just up` (uses `--env-file .env` and `-p notes_prod` for compose interpolation).
 #
 # Frontend: image `target: runner` runs `vite build` at image build time (no bind mounts, no Vite
 # dev/watch). Runtime is `serve` on port 3000. Pass `VITE_API_URL` via `.env` for compose build args.
@@ -60,12 +60,12 @@ services:
       - traefik.enable=true
       - traefik.docker.network=${TRAEFIK_DOCKER_NETWORK:-traefik-public}
       - traefik.constraint-label=traefik-public
-      - traefik.http.services.tool-template-backend.loadbalancer.server.port=8000
-      - traefik.http.routers.tool-template-backend-http.rule=Host(`backend.${DOMAIN}`)
-      - traefik.http.routers.tool-template-backend-http.entrypoints=web
+      - traefik.http.services.notes-backend.loadbalancer.server.port=8000
+      - traefik.http.routers.notes-backend-http.rule=Host(`backend.${DOMAIN}`)
+      - traefik.http.routers.notes-backend-http.entrypoints=web
 
   frontend:
-    image: tool-template-frontend-prod
+    image: notes-frontend-prod
     restart: unless-stopped
     # Multi-stage Dockerfile: builder = `vite build`; runner = static `dist` + `serve` (not `target: dev`).
     build:
@@ -86,9 +86,9 @@ services:
       - traefik.enable=true
       - traefik.docker.network=${TRAEFIK_DOCKER_NETWORK:-traefik-public}
       - traefik.constraint-label=traefik-public
-      - traefik.http.services.tool-template-frontend.loadbalancer.server.port=3000
-      - traefik.http.routers.tool-template-frontend-http.rule=Host(`${DOMAIN}`)
-      - traefik.http.routers.tool-template-frontend-http.entrypoints=web
+      - traefik.http.services.notes-frontend.loadbalancer.server.port=3000
+      - traefik.http.routers.notes-frontend-http.rule=Host(`${DOMAIN}`)
+      - traefik.http.routers.notes-frontend-http.entrypoints=web
 
 networks:
   traefik-public:

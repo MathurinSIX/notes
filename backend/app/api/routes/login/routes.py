@@ -26,6 +26,6 @@ async def login_access_token(
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
 ) -> Token:
     """
-    OAuth2-compatible login: ``username`` is the user's email, ``password`` is their password.
+    OAuth2-compatible login: ``username`` is the user's login name, ``password`` is their password.
     """
     return await token_service.login_password(form_data.username, form_data.password)

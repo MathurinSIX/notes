@@ -1,15 +1,18 @@
 import Breadcrumb from "@/components/Breadcrumb"
 import { ProjectLogo } from "@/components/ProjectLogo"
 import SettingMenu from "@/components/SettingMenu"
+import { WorkflowTopBarIndicator } from "@/components/WorkflowTopBarIndicator"
 import { useColorModeValue } from "@/components/ui/color-mode"
-import { useEffect } from "react"
 import { Link } from "@tanstack/react-router"
+import { useEffect } from "react"
 
 interface HomeLayoutProps {
 	children: React.ReactNode
 }
 
 export function HomeLayout({ children }: HomeLayoutProps) {
+	const borderColor = useColorModeValue("border-gray-200", "border-gray-800")
+
 	useEffect(() => {
 		const returnTo = sessionStorage.getItem("return_to")
 		if (returnTo) {
@@ -18,8 +21,6 @@ export function HomeLayout({ children }: HomeLayoutProps) {
 		}
 	}, [])
 
-	const borderColor = useColorModeValue("border-gray-200", "border-gray-800")
-
 	return (
 		<div className="flex flex-col mb-2">
 			<header
@@ -27,11 +28,18 @@ export function HomeLayout({ children }: HomeLayoutProps) {
 			>
 				<Link
 					to="/"
-					className="flex items-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+					className="flex shrink-0 items-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
 				>
 					<ProjectLogo />
 				</Link>
-				<div className="ml-auto flex items-center gap-4">
+				<WorkflowTopBarIndicator />
+				<div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-3 md:gap-4">
+					<Link
+						to="/notes"
+						className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+					>
+						Notes
+					</Link>
 					<SettingMenu />
 				</div>
 			</header>

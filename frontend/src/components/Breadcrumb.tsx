@@ -10,20 +10,31 @@ export default function Breadcrumb() {
 		select: (s) => s.location.pathname,
 	})
 
-	// Don't show breadcrumb on login or home page
+	// Don't show breadcrumb on login or bare root (redirects to /notes)
 	if (pathname === "/login" || pathname === "/") {
 		return null
 	}
 
 	const segments = pathname.split("/").filter(Boolean)
+	const uuidLike =
+		/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 	const items: BreadcrumbItem[] = [
 		{ label: "Home", href: "/" },
 		...segments.map((segment, index) => {
 			const href = `/${segments.slice(0, index + 1).join("/")}`
-			const label = segment
-				.split("-")
-				.map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-				.join(" ")
+			const prev = index > 0 ? segments[index - 1] : ""
+			const label =
+				prev === "notes" && uuidLike.test(segment)
+					? "Note"
+					: segment
+							.split("-")
+							.map(
+								(word) =>
+									word.charAt(0).toUpperCase() +
+									word.slice(1),
+							)
+							.join(" ")
 			return { label, href }
 		}),
 	]

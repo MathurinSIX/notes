@@ -62,18 +62,20 @@ class TokenService:
         )
         return Token(access_token=access_token, refresh_token=refresh_token)
 
-    async def login_password(self, email: str, password: str) -> Token:
-        user = await self.repository.read_by_email(email, bypass_rls=True)
+    async def login_password(self, username: str, password: str) -> Token:
+        user = await self.repository.read_by_username(
+            username.strip(), bypass_rls=True
+        )
         if user is None or not user.hashed_password:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Incorrect email or password",
+                detail="Incorrect username or password",
                 headers={"WWW-Authenticate": "Bearer"},
             )
         if not security.verify_password(password, user.hashed_password):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Incorrect email or password",
+                detail="Incorrect username or password",
                 headers={"WWW-Authenticate": "Bearer"},
             )
         if not user.is_active:
