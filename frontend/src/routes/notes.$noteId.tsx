@@ -18,6 +18,7 @@ import {
 	type ExternalNoteUpdateOut,
 } from "@/api/notes"
 import { ApiError } from "@/client"
+import { RunService } from "@/client/services"
 import { LineDiffBlock } from "@/components/diff/LineDiffBlock"
 import { MarkdownEditor } from "@/components/editor/MarkdownEditor"
 import { MarkdownPreview } from "@/components/editor/MarkdownPreview"
@@ -50,6 +51,7 @@ import {
 } from "@/lib/noteHistoryDiff"
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router"
 import { useCallback, useEffect, useMemo, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
 
 /** Avoid opening the incoming-updates modal twice (e.g. React Strict Mode). */
 const consumedIncomingDeepLinks = new Set<string>()
@@ -241,7 +243,20 @@ function NoteDetailPage() {
 	const [editingTaskId, setEditingTaskId] = useState<string | null>(null)
 	const [taskEditTitle, setTaskEditTitle] = useState("")
 	const [taskEditDueLocal, setTaskEditDueLocal] = useState("")
+	const [hadOngoingWorkflows, setHadOngoingWorkflows] = useState(false)
 	const navigate = useNavigate()
+	const { data: ongoingRunsData } = useQuery({
+		queryKey: ["workflowRuns", "ongoing"],
+		queryFn: () =>
+			RunService.listRuns({
+				status: ["pending", "started"],
+				deleted: [false],
+				limit: 1,
+				skip: 0,
+			}),
+		refetchInterval: (query) =>
+			query.state.data && query.state.data.count > 0 ? 5000 : 20000,
+	})
 
 	useEffect(() => {
 		rememberUpdateNotesFallbackNoteId(noteId)
@@ -463,6 +478,17 @@ function NoteDetailPage() {
 	useEffect(() => {
 		if (mounted && loggedIn) void load()
 	}, [mounted, loggedIn, load])
+
+	useEffect(() => {
+		const ongoingCount = ongoingRunsData?.count ?? 0
+		if (ongoingCount > 0) {
+			if (!hadOngoingWorkflows) setHadOngoingWorkflows(true)
+			return
+		}
+		if (!hadOngoingWorkflows || !mounted || !loggedIn) return
+		setHadOngoingWorkflows(false)
+		void load()
+	}, [ongoingRunsData?.count, hadOngoingWorkflows, mounted, loggedIn, load])
 
 	useEffect(() => {
 		setTaskOpenSkip(0)
