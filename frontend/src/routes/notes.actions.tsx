@@ -7,6 +7,9 @@ import { ApiError } from "@/client"
 import { FollowUpSourceButton } from "@/components/IncomingUpdateSourceHint"
 import { Button } from "@/components/ui/button"
 import {
+	datetimeLocalValueToIsoUtc,
+	dueAtToDatetimeLocalValue,
+	dueInstantsEqual,
 	formatDueAbsoluteTitle,
 	formatDueRelative,
 	isDueOverdue,
@@ -70,6 +73,79 @@ function ActionsSectionPagination({
 	)
 }
 
+function EditFollowUpForm({
+	title,
+	dueLocal,
+	saving,
+	onTitleChange,
+	onDueLocalChange,
+	onClearDue,
+	onSave,
+	onCancel,
+}: {
+	title: string
+	dueLocal: string
+	saving: boolean
+	onTitleChange: (v: string) => void
+	onDueLocalChange: (v: string) => void
+	onClearDue: () => void
+	onSave: () => void
+	onCancel: () => void
+}) {
+	return (
+		<div className="min-w-0 flex-1 space-y-2">
+			<textarea
+				value={title}
+				onChange={(e) => onTitleChange(e.target.value)}
+				rows={3}
+				disabled={saving}
+				className="w-full resize-y rounded-md border border-input bg-background px-2 py-1.5 text-sm text-foreground shadow-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
+			/>
+			<div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end">
+				<label className="flex min-w-0 flex-1 flex-col gap-1 text-xs text-muted-foreground">
+					<span>Due (optional)</span>
+					<input
+						type="datetime-local"
+						value={dueLocal}
+						onChange={(e) => onDueLocalChange(e.target.value)}
+						disabled={saving}
+						className="w-full min-w-0 rounded-md border border-input bg-background px-2 py-1.5 text-sm text-foreground shadow-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring sm:max-w-xs"
+					/>
+				</label>
+				<Button
+					type="button"
+					variant="outline"
+					size="sm"
+					className="w-fit shrink-0"
+					disabled={saving || dueLocal === ""}
+					onClick={onClearDue}
+				>
+					Clear due
+				</Button>
+			</div>
+			<div className="flex flex-wrap gap-2">
+				<Button
+					type="button"
+					size="sm"
+					disabled={saving}
+					onClick={onSave}
+				>
+					{saving ? "Saving…" : "Save"}
+				</Button>
+				<Button
+					type="button"
+					variant="outline"
+					size="sm"
+					disabled={saving}
+					onClick={onCancel}
+				>
+					Cancel
+				</Button>
+			</div>
+		</div>
+	)
+}
+
 function ActionsPage() {
 	const [mounted, setMounted] = useState(false)
 	const [authChecked, setAuthChecked] = useState(false)
@@ -88,6 +164,10 @@ function ActionsPage() {
 	const queryClient = useQueryClient()
 	const [openSkip, setOpenSkip] = useState(0)
 	const [doneSkip, setDoneSkip] = useState(0)
+	const [editingTaskId, setEditingTaskId] = useState<string | null>(null)
+	const [taskEditTitle, setTaskEditTitle] = useState("")
+	const [taskEditDueLocal, setTaskEditDueLocal] = useState("")
+	const [savingTaskId, setSavingTaskId] = useState<string | null>(null)
 
 	useEffect(() => {
 		setMounted(true)
@@ -185,6 +265,65 @@ function ActionsPage() {
 			setCompletingTaskIds(new Set(completingRef.current))
 		}
 	}
+
+	const startEditingTask = useCallback((a: NotesNextAction) => {
+		setEditingTaskId(a.task_id)
+		setTaskEditTitle(a.task_title)
+		setTaskEditDueLocal(dueAtToDatetimeLocalValue(a.due_at))
+		setError(null)
+	}, [])
+
+	const cancelEditingTask = useCallback(() => {
+		setEditingTaskId(null)
+	}, [])
+
+	const saveEditingTask = useCallback(
+		async (a: NotesNextAction) => {
+			const trimmed = taskEditTitle.trim()
+			if (!trimmed) {
+				setError("Follow-up text cannot be empty")
+				return
+			}
+			const body: { title?: string; due_at?: string | null } = {}
+			if (trimmed !== a.task_title) body.title = trimmed
+			const newDueIso = datetimeLocalValueToIsoUtc(taskEditDueLocal)
+			if (!dueInstantsEqual(a.due_at, newDueIso)) {
+				body.due_at = newDueIso
+			}
+			if (Object.keys(body).length === 0) {
+				setEditingTaskId(null)
+				return
+			}
+			setSavingTaskId(a.task_id)
+			setError(null)
+			try {
+				await patchNoteTask(a.note_id, a.task_id, body)
+				const res = await listNotes({ archived: false })
+				const na = res.next_actions ?? []
+				const da = res.recent_done_actions ?? []
+				setNextActions(na)
+				setRecentDoneActions(da)
+				queryClient.setQueryData(NOTES_NEXT_ACTIONS_HEADER_QUERY_KEY, na)
+				setEditingTaskId(null)
+			} catch (e) {
+				let msg = "Could not update follow-up"
+				if (
+					e instanceof ApiError &&
+					e.body &&
+					typeof e.body === "object"
+				) {
+					const d = e.body as { detail?: unknown }
+					if (Array.isArray(d.detail)) {
+						msg = d.detail.map((x) => JSON.stringify(x)).join("; ")
+					} else if (d.detail) msg = String(d.detail)
+				} else if (e instanceof Error) msg = e.message
+				setError(msg)
+			} finally {
+				setSavingTaskId((s) => (s === a.task_id ? null : s))
+			}
+		},
+		[queryClient, taskEditTitle, taskEditDueLocal],
+	)
 
 	const markNextActionUndone = async (a: NotesNextAction) => {
 		if (completingRef.current.has(a.task_id)) return
@@ -286,90 +425,124 @@ function ActionsPage() {
 									</p>
 								</div>
 								<ol className="list-none space-y-1.5 p-0">
-									{pagedNextActions.map((a) => {
-										const dueLabel = formatDueRelative(a.due_at)
-										const dueTitle = formatDueAbsoluteTitle(a.due_at)
-										const overdue = isDueOverdue(a.due_at)
-										const dueSoon = isDueWithinTwentyFourHours(
-											a.due_at,
-										)
-										const noteTitle =
-											a.note_title?.trim() || "Untitled"
-										const busy = completingTaskIds.has(a.task_id)
-										return (
-											<li key={`${a.note_id}-${a.task_id}`}>
-												<div
-													className={cn(
-														"flex flex-col gap-2 rounded-lg border border-transparent px-2 py-2 transition-colors hover:border-border hover:bg-muted/30 sm:flex-row sm:items-center sm:gap-3",
+								{pagedNextActions.map((a) => {
+									const dueLabel = formatDueRelative(a.due_at)
+									const dueTitle = formatDueAbsoluteTitle(a.due_at)
+									const overdue = isDueOverdue(a.due_at)
+									const dueSoon = isDueWithinTwentyFourHours(
+										a.due_at,
+									)
+									const noteTitle =
+										a.note_title?.trim() || "Untitled"
+									const busy = completingTaskIds.has(a.task_id)
+									const isEditing = editingTaskId === a.task_id
+									const isSaving = savingTaskId === a.task_id
+									return (
+										<li key={`${a.note_id}-${a.task_id}`}>
+											<div
+												className={cn(
+													"flex flex-col gap-2 rounded-lg border border-transparent px-2 py-2 transition-colors hover:border-border hover:bg-muted/30 sm:flex-row sm:items-start sm:gap-3",
+													!isEditing &&
 														busy &&
-															"pointer-events-none opacity-60",
-													)}
-												>
-													<input
-														type="checkbox"
-														className="mt-0.5 h-4 w-4 shrink-0 rounded border-input sm:mt-0"
-														checked={false}
-														disabled={busy}
-														aria-label={`Mark done: ${a.task_title}`}
-														onChange={() =>
-															void markNextActionDone(a)
+														"pointer-events-none opacity-60",
+												)}
+											>
+												{isEditing ? (
+													<EditFollowUpForm
+														title={taskEditTitle}
+														dueLocal={taskEditDueLocal}
+														saving={isSaving}
+														onTitleChange={setTaskEditTitle}
+														onDueLocalChange={setTaskEditDueLocal}
+														onClearDue={() =>
+															setTaskEditDueLocal("")
 														}
+														onSave={() =>
+															void saveEditingTask(a)
+														}
+														onCancel={cancelEditingTask}
 													/>
-													<div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
-														<Link
-															to="/notes/$noteId"
-															params={{ noteId: a.note_id }}
-															className="min-w-0 flex-1 rounded-md outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-														>
-															<p className="text-sm font-medium leading-snug text-foreground">
-																{a.task_title}
-															</p>
-															<p className="mt-0.5 truncate text-xs text-muted-foreground">
-																<span className="text-muted-foreground/80">
-																	Note
-																</span>{" "}
-																· {noteTitle}
-															</p>
-														</Link>
-														<div className="flex shrink-0 flex-row items-center gap-1.5 self-end sm:self-auto">
-															{dueLabel ? (
-																<span
-																	title={dueTitle ?? undefined}
-																	className={
-																		overdue
-																			? "rounded-md border border-amber-400/45 bg-amber-500/15 px-2.5 py-1 text-sm font-bold tracking-tight text-amber-950 shadow-sm dark:border-amber-700/40 dark:bg-amber-950/30 dark:text-amber-50"
-																			: dueSoon
-																			  ? "rounded-md border border-red-400/50 bg-red-500/15 px-2.5 py-1 text-sm font-bold tracking-tight text-red-950 shadow-sm dark:border-red-700/50 dark:bg-red-950/35 dark:text-red-50"
-																			  : "rounded-md border border-border bg-muted/70 px-2.5 py-1 text-sm font-bold tracking-tight text-foreground shadow-sm"
+												) : (
+													<>
+														<input
+															type="checkbox"
+															className="mt-0.5 h-4 w-4 shrink-0 rounded border-input sm:mt-0"
+															checked={false}
+															disabled={busy}
+															aria-label={`Mark done: ${a.task_title}`}
+															onChange={() =>
+																void markNextActionDone(a)
+															}
+														/>
+														<div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
+															<Link
+																to="/notes/$noteId"
+																params={{ noteId: a.note_id }}
+																className="min-w-0 flex-1 rounded-md outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+															>
+																<p className="text-sm font-medium leading-snug text-foreground">
+																	{a.task_title}
+																</p>
+																<p className="mt-0.5 truncate text-xs text-muted-foreground">
+																	<span className="text-muted-foreground/80">
+																		Note
+																	</span>{" "}
+																	· {noteTitle}
+																</p>
+															</Link>
+															<div className="flex shrink-0 flex-row items-center gap-1.5 self-end sm:self-auto">
+																{dueLabel ? (
+																	<span
+																		title={dueTitle ?? undefined}
+																		className={
+																			overdue
+																				? "rounded-md border border-amber-400/45 bg-amber-500/15 px-2.5 py-1 text-sm font-bold tracking-tight text-amber-950 shadow-sm dark:border-amber-700/40 dark:bg-amber-950/30 dark:text-amber-50"
+																				: dueSoon
+																				  ? "rounded-md border border-red-400/50 bg-red-500/15 px-2.5 py-1 text-sm font-bold tracking-tight text-red-950 shadow-sm dark:border-red-700/50 dark:bg-red-950/35 dark:text-red-50"
+																				  : "rounded-md border border-border bg-muted/70 px-2.5 py-1 text-sm font-bold tracking-tight text-foreground shadow-sm"
+																		}
+																	>
+																		Due {dueLabel}
+																	</span>
+																) : (
+																	<span className="text-xs text-muted-foreground">
+																		No due date
+																	</span>
+																)}
+																<Button
+																	type="button"
+																	variant="ghost"
+																	size="sm"
+																	className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
+																	disabled={busy}
+																	onClick={() =>
+																		startEditingTask(a)
 																	}
 																>
-																	Due {dueLabel}
-																</span>
-															) : (
-																<span className="text-xs text-muted-foreground">
-																	No due date
-																</span>
-															)}
-															<FollowUpSourceButton
-																updateId={a.external_note_update_id}
-																onViewSource={(id) =>
-																	void navigate({
-																		to: "/notes/$noteId",
-																		params: {
-																			noteId: a.note_id,
-																		},
-																		search: {
-																			followUpSource: id,
-																		},
-																	})
-																}
-															/>
+																	Edit
+																</Button>
+																<FollowUpSourceButton
+																	updateId={a.external_note_update_id}
+																	onViewSource={(id) =>
+																		void navigate({
+																			to: "/notes/$noteId",
+																			params: {
+																				noteId: a.note_id,
+																			},
+																			search: {
+																				followUpSource: id,
+																			},
+																		})
+																	}
+																/>
+															</div>
 														</div>
-													</div>
-												</div>
-											</li>
-										)
-									})}
+													</>
+												)}
+											</div>
+										</li>
+									)
+								})}
 								</ol>
 								<ActionsSectionPagination
 									total={nextActions.length}
@@ -418,91 +591,125 @@ function ActionsPage() {
 									</p>
 								</div>
 								<ol className="list-none space-y-1.5 p-0">
-									{pagedRecentDone.map((a) => {
-										const dueLabel = formatDueRelative(a.due_at)
-										const dueTitle = formatDueAbsoluteTitle(a.due_at)
-										const doneLabel = formatDueRelative(
-											a.done_updated_ts,
-										)
-										const doneTitle = formatDueAbsoluteTitle(
-											a.done_updated_ts,
-										)
-										const noteTitle =
-											a.note_title?.trim() || "Untitled"
-										const busy = completingTaskIds.has(a.task_id)
-										return (
-											<li key={`done-${a.note_id}-${a.task_id}`}>
-												<div
-													className={cn(
-														"flex flex-col gap-2 rounded-lg border border-transparent px-2 py-2 transition-colors hover:border-border hover:bg-muted/40 sm:flex-row sm:items-center sm:gap-3",
+								{pagedRecentDone.map((a) => {
+									const dueLabel = formatDueRelative(a.due_at)
+									const dueTitle = formatDueAbsoluteTitle(a.due_at)
+									const doneLabel = formatDueRelative(
+										a.done_updated_ts,
+									)
+									const doneTitle = formatDueAbsoluteTitle(
+										a.done_updated_ts,
+									)
+									const noteTitle =
+										a.note_title?.trim() || "Untitled"
+									const busy = completingTaskIds.has(a.task_id)
+									const isEditing = editingTaskId === a.task_id
+									const isSaving = savingTaskId === a.task_id
+									return (
+										<li key={`done-${a.note_id}-${a.task_id}`}>
+											<div
+												className={cn(
+													"flex flex-col gap-2 rounded-lg border border-transparent px-2 py-2 transition-colors hover:border-border hover:bg-muted/40 sm:flex-row sm:items-start sm:gap-3",
+													!isEditing &&
 														busy &&
-															"pointer-events-none opacity-60",
-													)}
-												>
-													<input
-														type="checkbox"
-														className="mt-0.5 h-4 w-4 shrink-0 rounded border-input sm:mt-0"
-														checked
-														disabled={busy}
-														aria-label={`Mark not done: ${a.task_title}`}
-														onChange={() =>
-															void markNextActionUndone(a)
+														"pointer-events-none opacity-60",
+												)}
+											>
+												{isEditing ? (
+													<EditFollowUpForm
+														title={taskEditTitle}
+														dueLocal={taskEditDueLocal}
+														saving={isSaving}
+														onTitleChange={setTaskEditTitle}
+														onDueLocalChange={setTaskEditDueLocal}
+														onClearDue={() =>
+															setTaskEditDueLocal("")
 														}
+														onSave={() =>
+															void saveEditingTask(a)
+														}
+														onCancel={cancelEditingTask}
 													/>
-													<div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
-														<Link
-															to="/notes/$noteId"
-															params={{ noteId: a.note_id }}
-															className="min-w-0 flex-1 rounded-md outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-														>
-															<p className="text-sm font-medium leading-snug text-muted-foreground line-through">
-																{a.task_title}
-															</p>
-															<p className="mt-0.5 truncate text-xs text-muted-foreground">
-																<span className="text-muted-foreground/80">
-																	Note
-																</span>{" "}
-																· {noteTitle}
-															</p>
-														</Link>
-														<div className="flex shrink-0 flex-row flex-wrap items-center justify-end gap-1.5 self-end text-xs text-muted-foreground sm:self-auto sm:text-right">
-															{doneLabel ? (
-																<span
-																	title={doneTitle ?? undefined}
+												) : (
+													<>
+														<input
+															type="checkbox"
+															className="mt-0.5 h-4 w-4 shrink-0 rounded border-input sm:mt-0"
+															checked
+															disabled={busy}
+															aria-label={`Mark not done: ${a.task_title}`}
+															onChange={() =>
+																void markNextActionUndone(a)
+															}
+														/>
+														<div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
+															<Link
+																to="/notes/$noteId"
+																params={{ noteId: a.note_id }}
+																className="min-w-0 flex-1 rounded-md outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+															>
+																<p className="text-sm font-medium leading-snug text-muted-foreground line-through">
+																	{a.task_title}
+																</p>
+																<p className="mt-0.5 truncate text-xs text-muted-foreground">
+																	<span className="text-muted-foreground/80">
+																		Note
+																	</span>{" "}
+																	· {noteTitle}
+																</p>
+															</Link>
+															<div className="flex shrink-0 flex-row flex-wrap items-center justify-end gap-1.5 self-end text-xs text-muted-foreground sm:self-auto sm:text-right">
+																{doneLabel ? (
+																	<span
+																		title={doneTitle ?? undefined}
+																	>
+																		Done {doneLabel}
+																	</span>
+																) : (
+																	<span>Done</span>
+																)}
+																{dueLabel ? (
+																	<span
+																		title={dueTitle ?? undefined}
+																		className="rounded-md border border-border bg-muted/50 px-2 py-1 text-xs font-bold tracking-tight text-foreground/90 shadow-sm"
+																	>
+																		Was due {dueLabel}
+																	</span>
+																) : null}
+																<Button
+																	type="button"
+																	variant="ghost"
+																	size="sm"
+																	className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
+																	disabled={busy}
+																	onClick={() =>
+																		startEditingTask(a)
+																	}
 																>
-																	Done {doneLabel}
-																</span>
-															) : (
-																<span>Done</span>
-															)}
-															{dueLabel ? (
-																<span
-																	title={dueTitle ?? undefined}
-																	className="rounded-md border border-border bg-muted/50 px-2 py-1 text-xs font-bold tracking-tight text-foreground/90 shadow-sm"
-																>
-																	Was due {dueLabel}
-																</span>
-															) : null}
-															<FollowUpSourceButton
-																updateId={a.external_note_update_id}
-																onViewSource={(id) =>
-																	void navigate({
-																		to: "/notes/$noteId",
-																		params: {
-																			noteId: a.note_id,
-																		},
-																		search: {
-																			followUpSource: id,
-																		},
-																	})
-																}
-															/>
+																	Edit
+																</Button>
+																<FollowUpSourceButton
+																	updateId={a.external_note_update_id}
+																	onViewSource={(id) =>
+																		void navigate({
+																			to: "/notes/$noteId",
+																			params: {
+																				noteId: a.note_id,
+																			},
+																			search: {
+																				followUpSource: id,
+																			},
+																		})
+																	}
+																/>
+															</div>
 														</div>
-													</div>
-												</div>
-											</li>
-										)
-									})}
+													</>
+												)}
+											</div>
+										</li>
+									)
+								})}
 								</ol>
 								<ActionsSectionPagination
 									total={recentDoneActions.length}

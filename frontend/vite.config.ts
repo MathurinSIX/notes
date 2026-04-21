@@ -12,6 +12,7 @@ export default defineConfig({
 		}),
 		react(),
 		VitePWA({
+			disable: process.env.VITE_README_SCREENSHOTS === "1",
 			registerType: "autoUpdate",
 			includeAssets: [
 				"favicon.svg",

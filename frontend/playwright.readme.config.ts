@@ -1,14 +1,19 @@
+import path from "node:path"
+import { fileURLToPath } from "node:url"
+import { config as loadEnv } from "dotenv"
 import { defineConfig, devices } from "@playwright/test"
 
-const readmeApiUrl =
-	process.env.README_API_URL?.trim() || "http://127.0.0.1:8000"
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
+/** Optional: pick up FIRST_SUPERUSER_* for screenshot login when not set in the shell. */
+loadEnv({ path: path.resolve(__dirname, "../.env.development") })
+
 const readmeBaseUrl =
 	process.env.README_BASE_URL?.trim() || "http://localhost:3000"
 
 /**
- * README screenshots: starts Vite (see webServer) and opens README_BASE_URL.
- * Set README_API_URL to a reachable FastAPI base (browser + token request), e.g.
- * `http://127.0.0.1:8000` when the backend is published on the host loopback.
+ * README screenshots: builds preview with same-origin API (`VITE_API_SAME_ORIGIN`);
+ * the test bridges XHR to Traefik via `README_API_URL` / `DOMAIN` (see readme-screenshots.spec.ts).
  */
 export default defineConfig({
 	testDir: "./tests",
@@ -26,7 +31,7 @@ export default defineConfig({
 	webServer: process.env.README_SKIP_VITE
 		? undefined
 		: {
-				command: `VITE_API_URL=${readmeApiUrl} npm run build && VITE_API_URL=${readmeApiUrl} npm run preview`,
+				command: `VITE_README_SCREENSHOTS=1 VITE_API_SAME_ORIGIN=1 npm run build && VITE_README_SCREENSHOTS=1 VITE_API_SAME_ORIGIN=1 npm run preview`,
 				url: readmeBaseUrl,
 				reuseExistingServer: !process.env.CI,
 				timeout: 180_000,

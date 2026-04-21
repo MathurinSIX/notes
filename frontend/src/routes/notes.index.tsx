@@ -1,9 +1,4 @@
-import {
-	type NotesListItem,
-	createNote,
-	deleteNote,
-	listNotes,
-} from "@/api/notes"
+import { type NotesListItem, createNote, listNotes } from "@/api/notes"
 import { ApiError } from "@/client"
 import { NOTES_NEXT_ACTIONS_HEADER_QUERY_KEY } from "@/components/NextActionsHeaderLink"
 import { useOpenUpdateNotesModal } from "@/components/UpdateNotesModalContext"
@@ -87,29 +82,6 @@ function NotesPage() {
 			navigate({ to: "/notes/$noteId", params: { noteId: n.id } })
 		} catch (e) {
 			setError(e instanceof Error ? e.message : "Could not create note")
-		}
-	}
-
-	const handleDeleteNote = async (n: NotesListItem) => {
-		const label = n.title?.trim() || "Untitled"
-		if (
-			!window.confirm(
-				`Permanently delete “${label}”? All sections and follow-ups will be removed. This cannot be undone.`,
-			)
-		) {
-			return
-		}
-		try {
-			setError(null)
-			await deleteNote(n.id)
-			await load()
-		} catch (e) {
-			let msg = "Could not delete note"
-			if (e instanceof ApiError && e.body && typeof e.body === "object") {
-				const d = e.body as { detail?: unknown }
-				if (d.detail) msg = String(d.detail)
-			} else if (e instanceof Error) msg = e.message
-			setError(msg)
 		}
 	}
 
@@ -264,20 +236,17 @@ function NotesPage() {
 							const topAccent = CARD_TOP_ACCENT[i % CARD_TOP_ACCENT.length]
 							return (
 								<li key={n.id}>
-									<div
+									<Link
+										to="/notes/$noteId"
+										params={{ noteId: n.id }}
 										className={cn(
-											"group flex h-full min-h-[7.5rem] flex-col overflow-hidden rounded-lg border border-border border-t-2 bg-card text-card-foreground shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md",
+											"group flex h-full min-h-[7.5rem] flex-col overflow-hidden rounded-lg border border-border border-t-2 bg-card p-4 text-card-foreground shadow-sm outline-none ring-offset-background transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
 											topAccent,
 											listView === "archived" &&
 												"border-t-amber-500 opacity-95 hover:border-amber-500/40 dark:border-t-amber-500 dark:hover:border-amber-400/50",
 										)}
 									>
-										<Link
-											to="/notes/$noteId"
-											params={{ noteId: n.id }}
-											className="flex flex-1 flex-col gap-2 p-4 text-card-foreground outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-										>
-											<div className="flex flex-1 flex-col gap-2">
+										<div className="flex flex-1 flex-col gap-2">
 												<div className="flex items-start justify-between gap-2">
 													<h2 className="line-clamp-2 min-w-0 flex-1 text-base font-semibold leading-snug text-foreground transition-colors group-hover:text-primary">
 														{title}
@@ -314,21 +283,7 @@ function NotesPage() {
 													</span>
 												</div>
 											</div>
-										</Link>
-										<div className="flex justify-end border-t border-border/60 bg-muted/15 px-2 py-1.5 dark:bg-muted/10">
-											<Button
-												type="button"
-												variant="ghost"
-												size="sm"
-												className="h-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
-												onClick={() =>
-													void handleDeleteNote(n)
-												}
-											>
-												Delete
-											</Button>
-										</div>
-									</div>
+									</Link>
 								</li>
 							)
 						})}

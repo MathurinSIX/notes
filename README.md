@@ -6,19 +6,43 @@ Full-stack template with a **FastAPI** backend and a **Vite** + **React** fronte
 
 This repository is a **production-style starter** for building web apps on GitLab: a typed REST API, PostgreSQL with Alembic migrations, Docker Compose for local development (Traefik routing, optional MinIO and Grafana), and a React SPA with TanStack Router and Radix-based UI. The backend follows a small **domain module layout** (models, repository, service, schemas, routes) and uses **repository-level row-level security** hooks so multi-tenant style access rules stay next to the data layer.
 
-The frontend ships with **email and password sign-in**, a shell layout (header, settings, breadcrumbs), and **notes with drafts** (list notes, open a note, start a draft from the header). From here you replace branding, routes, and domains with your product while keeping the same deployment and migration workflow.
+The frontend ships with **username and password sign-in**, a shell layout (header with **Update notes**, **Actions**, **Updates**, settings, and breadcrumbs), and **notes with drafts**: list active or archived notes, open a note with markdown sections and follow-up tasks, review **change history** and **incoming merge updates**, run the **Update notes** workflow from a modal, track follow-ups on the **Actions** page, and inspect **Sent updates** from the merge pipeline.
 
 ### Screenshots
 
-Illustrative screenshots of the bundled screens; swap in your own captures from a running dev stack when you have finalized branding.
+These captures are produced by Playwright (`npm run screenshots:readme` in `frontend/`; see [Local Development](#local-development)). The build uses same-origin API URLs (`VITE_API_SAME_ORIGIN=1`); the test forwards `/login`, `/notes`, `/chunks`, etc. from the preview server to your Traefik backend (`README_API_URL` / `DOMAIN`, default loopback + `Host: backend.${DOMAIN}`). Repo `.env.development` supplies `DOMAIN` and first-superuser credentials when not set in the shell. Regenerate after UI changes so images stay accurate.
 
-**Sign-in** — token-based login against the FastAPI `/login` flow.
+**Sign-in** — OAuth2-style username and password against `/login/access-token`.
 
 ![Sign-in page](docs/screenshots/login.png)
 
-**Notes** — signed-in list of notes with a shortcut to create a new note.
+**Notes** — list with Active / Archived tabs, **New note**, and **Update notes** on the index when available.
 
 ![Notes list](docs/screenshots/notes.png)
+
+**Note detail** — title and summary, toolbar (History, Incoming updates, Add section), markdown sections, and archive/delete actions.
+
+![Note detail](docs/screenshots/note-detail.png)
+
+**Change history** — per-note timeline with line-level diffs for metadata, sections, and follow-ups.
+
+![Note change history dialog](docs/screenshots/note-change-history.png)
+
+**Incoming updates** — merge submissions linked to the note (status, body preview).
+
+![Incoming updates dialog](docs/screenshots/note-incoming-updates.png)
+
+**Update notes** — modal to paste text and optionally pick a fallback note for the background merge workflow.
+
+![Update notes modal](docs/screenshots/update-notes-modal.png)
+
+**Actions** — open and recently completed follow-ups across active notes, with quick complete / reopen.
+
+![Actions page](docs/screenshots/actions.png)
+
+**Sent updates** — table of updates you submitted via **Update notes**, with status and links to matched notes.
+
+![Sent updates page](docs/screenshots/sent-updates.png)
 
 ---
 
@@ -152,6 +176,8 @@ Everything runs in Docker. Use the [justfile](https://just.systems/) (run `just`
 | `just refresh-dev` | Rebuild dev images and recreate containers |
 | `just down-dev` | Stop the development stack (keeps named volumes) |
 | `just generate-client` | Generate the frontend API client from the backend OpenAPI spec (requires backend running) |
+
+**README screenshots:** After `just up-dev` (Traefik + API on `http://backend.${DOMAIN}`), from `frontend/` run `npm run screenshots:readme`. Optional env vars: `README_API_URL`, `README_BASE_URL`, `README_SCREENSHOT_USERNAME`, `README_SCREENSHOT_PASSWORD`, `README_SKIP_VITE=1` if you already serve the built app at `README_BASE_URL`.
 
 ### Local Service URLs
 
