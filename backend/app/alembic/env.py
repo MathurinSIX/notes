@@ -25,6 +25,7 @@ from app.api.routes.user.models import User  # noqa: F401 - register table
 from app.api.routes.user_tokens.models import UserToken  # noqa: F401 - register table
 from app.api.routes.run_step.models import RunStep  # noqa: F401 - register table
 from app.api.routes.run.models import Run  # noqa: F401 - register table
+from app.api.routes.files.models import PastedImage  # noqa: F401 - register table
 from app.api.routes.note.models import (  # noqa: F401 - register tables
     Chunk,
     ChunkDraftLink,

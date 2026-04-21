@@ -103,6 +103,9 @@ services:
         restart: true
       prestart:
         condition: service_completed_successfully
+      # MinIO must be up (and bucket created) before uploads; otherwise boto3 → connection refused.
+      storage-init:
+        condition: service_completed_successfully
     env_file:
       - .env.development
     environment:

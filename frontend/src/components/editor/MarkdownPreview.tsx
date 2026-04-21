@@ -1,3 +1,4 @@
+import { authMarkdownImageComponents } from "@/components/editor/MarkdownAuthImage"
 import { cn } from "@/lib/utils"
 import MDEditor from "@uiw/react-md-editor"
 import "@uiw/react-md-editor/markdown-editor.css"
@@ -30,7 +31,10 @@ export function MarkdownPreview({
 			)}
 			data-color-mode={colorMode}
 		>
-			<MDEditor.Markdown source={source} />
+			<MDEditor.Markdown
+				source={source}
+				components={authMarkdownImageComponents}
+			/>
 		</div>
 	)
 }

@@ -82,6 +82,11 @@ class Settings(BaseSettings):
     S3_SECRET_ACCESS_KEY: str = "minioadmin"
     S3_REGION_NAME: str = "us-east-1"
 
+    # Pasted note images (multipart upload → bucket; markdown stores returned URL).
+    NOTE_PASTE_IMAGE_MAX_BYTES: int = 25 * 1024 * 1024
+    # Presigned GET lifetime (capped at S3 SigV4 max unless using native GCS client).
+    NOTE_IMAGE_GET_URL_EXPIRES_SECONDS: int = 7 * 24 * 3600
+
     # Postgres
     POSTGRES_SERVER: str = "localhost"
     POSTGRES_PORT: int = 5432
