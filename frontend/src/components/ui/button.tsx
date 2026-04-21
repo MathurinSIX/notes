@@ -21,6 +21,8 @@ const buttonVariants = cva(
 				link: "text-primary underline-offset-4 hover:underline",
 				solid: "bg-primary text-primary-foreground hover:bg-primary/90",
 				brand: "border-0 bg-gradient-to-r from-amber-600 via-yellow-500 to-amber-400 text-neutral-950 shadow-sm hover:brightness-105 hover:shadow-md dark:from-yellow-300 dark:via-amber-300 dark:to-yellow-200 dark:text-neutral-950",
+				updateNotes:
+					"border-0 bg-gradient-to-r from-primary via-chart-2 to-chart-3 text-primary-foreground shadow-sm [text-shadow:0_1px_0_rgb(0_0_0_/_0.12)] hover:brightness-110 hover:shadow-md active:brightness-95 dark:via-chart-4 dark:to-chart-5 dark:[text-shadow:0_1px_1px_rgb(0_0_0_/_0.35)]",
 			},
 			size: {
 				default: "h-10 px-4 py-2",

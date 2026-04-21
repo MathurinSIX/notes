@@ -224,14 +224,14 @@ create_revision message: init-env-dev
     msg=$(printf %q "$1")
     docker compose {{compose_project_dev}} --env-file "{{root}}/.env.development" -f "{{root}}/docker-compose.yml" run --rm \
         -v "{{root}}/backend/app:/app/app" \
-        backend bash -lc "cd /app && alembic revision --autogenerate -m $msg"
+        backend bash -lc "cd /app && uv run alembic revision --autogenerate -m $msg"
 
 # Apply all pending Alembic migrations (Docker).
 [group('backend')]
 migrate: init-env-dev
     docker compose {{compose_project_dev}} --env-file "{{root}}/.env.development" -f "{{root}}/docker-compose.yml" run --rm \
         -v "{{root}}/backend/app:/app/app" \
-        backend bash -lc "cd /app && alembic upgrade head"
+        backend bash -lc "cd /app && uv run alembic upgrade head"
 
 # Add a Python dependency via uv in Docker (updates backend/pyproject.toml + uv.lock; full repo mount for path deps).
 [group('packages')]

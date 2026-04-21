@@ -41,7 +41,7 @@ export default function Breadcrumb() {
 
 	return (
 		<nav
-			className="flex min-h-[44px] items-center gap-2 border-b border-border bg-background px-6 py-3 text-sm"
+			className="flex min-h-[44px] items-center gap-2 border-b border-border bg-gradient-to-r from-background/90 via-primary/[0.04] to-background/90 px-6 py-3 text-sm dark:via-chart-3/[0.08]"
 			aria-label="Breadcrumb"
 		>
 			<ol className="flex items-center gap-2">
@@ -55,7 +55,7 @@ export default function Breadcrumb() {
 							{index === 0 ? (
 								<Link
 									to={item.href}
-									className="flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors"
+									className="flex items-center gap-1 text-muted-foreground transition-colors hover:text-primary"
 								>
 									<span>Home</span>
 								</Link>
@@ -71,7 +71,7 @@ export default function Breadcrumb() {
 									) : (
 										<Link
 											to={item.href}
-											className="text-muted-foreground hover:text-foreground transition-colors"
+											className="text-muted-foreground transition-colors hover:text-primary"
 										>
 											{item.label}
 										</Link>

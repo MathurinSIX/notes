@@ -13,6 +13,8 @@ import { Route as NotesRouteImport } from './routes/notes'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as NotesIndexRouteImport } from './routes/notes.index'
+import { Route as NotesUpdatesRouteImport } from './routes/notes.updates'
+import { Route as NotesActionsRouteImport } from './routes/notes.actions'
 import { Route as NotesNoteIdRouteImport } from './routes/notes.$noteId'
 
 const NotesRoute = NotesRouteImport.update({
@@ -35,6 +37,16 @@ const NotesIndexRoute = NotesIndexRouteImport.update({
   path: '/',
   getParentRoute: () => NotesRoute,
 } as any)
+const NotesUpdatesRoute = NotesUpdatesRouteImport.update({
+  id: '/updates',
+  path: '/updates',
+  getParentRoute: () => NotesRoute,
+} as any)
+const NotesActionsRoute = NotesActionsRouteImport.update({
+  id: '/actions',
+  path: '/actions',
+  getParentRoute: () => NotesRoute,
+} as any)
 const NotesNoteIdRoute = NotesNoteIdRouteImport.update({
   id: '/$noteId',
   path: '/$noteId',
@@ -46,12 +58,16 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/notes': typeof NotesRouteWithChildren
   '/notes/$noteId': typeof NotesNoteIdRoute
+  '/notes/actions': typeof NotesActionsRoute
+  '/notes/updates': typeof NotesUpdatesRoute
   '/notes/': typeof NotesIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/notes/$noteId': typeof NotesNoteIdRoute
+  '/notes/actions': typeof NotesActionsRoute
+  '/notes/updates': typeof NotesUpdatesRoute
   '/notes': typeof NotesIndexRoute
 }
 export interface FileRoutesById {
@@ -60,14 +76,37 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/notes': typeof NotesRouteWithChildren
   '/notes/$noteId': typeof NotesNoteIdRoute
+  '/notes/actions': typeof NotesActionsRoute
+  '/notes/updates': typeof NotesUpdatesRoute
   '/notes/': typeof NotesIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/login' | '/notes' | '/notes/$noteId' | '/notes/'
+  fullPaths:
+    | '/'
+    | '/login'
+    | '/notes'
+    | '/notes/$noteId'
+    | '/notes/actions'
+    | '/notes/updates'
+    | '/notes/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/login' | '/notes/$noteId' | '/notes'
-  id: '__root__' | '/' | '/login' | '/notes' | '/notes/$noteId' | '/notes/'
+  to:
+    | '/'
+    | '/login'
+    | '/notes/$noteId'
+    | '/notes/actions'
+    | '/notes/updates'
+    | '/notes'
+  id:
+    | '__root__'
+    | '/'
+    | '/login'
+    | '/notes'
+    | '/notes/$noteId'
+    | '/notes/actions'
+    | '/notes/updates'
+    | '/notes/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -106,6 +145,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof NotesIndexRouteImport
       parentRoute: typeof NotesRoute
     }
+    '/notes/updates': {
+      id: '/notes/updates'
+      path: '/updates'
+      fullPath: '/notes/updates'
+      preLoaderRoute: typeof NotesUpdatesRouteImport
+      parentRoute: typeof NotesRoute
+    }
+    '/notes/actions': {
+      id: '/notes/actions'
+      path: '/actions'
+      fullPath: '/notes/actions'
+      preLoaderRoute: typeof NotesActionsRouteImport
+      parentRoute: typeof NotesRoute
+    }
     '/notes/$noteId': {
       id: '/notes/$noteId'
       path: '/$noteId'
@@ -118,11 +171,15 @@ declare module '@tanstack/react-router' {
 
 interface NotesRouteChildren {
   NotesNoteIdRoute: typeof NotesNoteIdRoute
+  NotesActionsRoute: typeof NotesActionsRoute
+  NotesUpdatesRoute: typeof NotesUpdatesRoute
   NotesIndexRoute: typeof NotesIndexRoute
 }
 
 const NotesRouteChildren: NotesRouteChildren = {
   NotesNoteIdRoute: NotesNoteIdRoute,
+  NotesActionsRoute: NotesActionsRoute,
+  NotesUpdatesRoute: NotesUpdatesRoute,
   NotesIndexRoute: NotesIndexRoute,
 }
 

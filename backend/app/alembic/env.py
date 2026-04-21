@@ -28,8 +28,13 @@ from app.api.routes.run.models import Run  # noqa: F401 - register table
 from app.api.routes.note.models import (  # noqa: F401 - register tables
     Chunk,
     ChunkDraftLink,
+    ChunkHistory,
     Draft,
+    ExternalNoteUpdate,
     Note,
+    NoteHistory,
+    NoteTask,
+    NoteTaskHistory,
 )
 from app.core.config import settings
 
