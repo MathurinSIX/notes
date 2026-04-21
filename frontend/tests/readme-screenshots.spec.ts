@@ -347,6 +347,19 @@ test("README screenshots", async ({ page, context }) => {
 		path: path.join(screenshotDir, "update-notes-modal.png"),
 		fullPage: true,
 	})
+	await page.getByLabel("Update text").fill(
+		[
+			"Weekly sync summary:",
+			"- API contract finalized",
+			"- Need follow-up with design on empty states",
+			"- Move release checklist to next Friday",
+		].join("\n"),
+	)
+	await waitForScreenshotStable(page)
+	await page.screenshot({
+		path: path.join(screenshotDir, "update-notes-example.png"),
+		fullPage: true,
+	})
 	await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click()
 
 	mockActionsApi = true

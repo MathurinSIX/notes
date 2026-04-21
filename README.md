@@ -8,6 +8,23 @@ This repository is a **production-style starter** for building web apps on GitLa
 
 The frontend ships with **username and password sign-in**, a shell layout (header with **Update notes**, **Actions**, **Updates**, settings, and breadcrumbs), and **notes with drafts**: list active or archived notes, open a note with markdown sections and follow-up tasks, review **change history** and **incoming merge updates**, run the **Update notes** workflow from a modal, track follow-ups on the **Actions** page, and inspect **Sent updates** from the merge pipeline.
 
+### How AI note updates work
+
+The **Update notes** flow is an async workflow endpoint (`/workflow/update-notes`) that takes free-form text and applies it to your notes in the background:
+
+1. You submit raw text from the modal (optionally with a fallback note).
+2. The workflow stores that submission as an **external note update**.
+3. An LLM matches the best target note using existing note titles/summaries (or fallback when matching is uncertain).
+4. Another LLM pass proposes structured changes: section edits plus follow-up tasks.
+5. The backend writes those changes through the normal note/chunk/task APIs, records timeline snapshots, and links the resulting rows back to the incoming update ID.
+6. UI surfaces update automatically:
+   - **Note detail** shows changed sections and linked incoming updates.
+   - **History** shows diffs (note, section, task).
+   - **Actions** shows newly created follow-up tasks.
+   - **Sent updates** tracks merge status (`pending`, `merged`, `failed`, `no_match`).
+
+This keeps the model output auditable: every generated change is tied to a source update and visible in history.
+
 ### Screenshots
 
 These captures are produced by Playwright (`npm run screenshots:readme` in `frontend/`; see [Local Development](#local-development)). The build uses same-origin API URLs (`VITE_API_SAME_ORIGIN=1`); the test forwards `/login`, `/notes`, `/chunks`, etc. from the preview server to your Traefik backend (`README_API_URL` / `DOMAIN`, default loopback + `Host: backend.${DOMAIN}`). Repo `.env.development` supplies `DOMAIN` and first-superuser credentials when not set in the shell. Regenerate after UI changes so images stay accurate.
@@ -35,6 +52,10 @@ These captures are produced by Playwright (`npm run screenshots:readme` in `fron
 **Update notes** — modal to paste text and optionally pick a fallback note for the background merge workflow.
 
 ![Update notes modal](docs/screenshots/update-notes-modal.png)
+
+**Update notes example** — sample submission text before starting the workflow.
+
+![Update notes example](docs/screenshots/update-notes-example.png)
 
 **Actions** — open and recently completed follow-ups across active notes, with quick complete / reopen.
 
