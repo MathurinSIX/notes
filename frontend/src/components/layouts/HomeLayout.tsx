@@ -5,6 +5,7 @@ import Breadcrumb from "@/components/Breadcrumb"
 import { NextActionsHeaderLink } from "@/components/NextActionsHeaderLink"
 import { ProjectLogo } from "@/components/ProjectLogo"
 import SettingMenu from "@/components/SettingMenu"
+import { MarkdownEditor } from "@/components/editor/MarkdownEditor"
 import { OpenUpdateNotesModalContext } from "@/components/UpdateNotesModalContext"
 import { WorkflowTopBarIndicator } from "@/components/WorkflowTopBarIndicator"
 import { Button } from "@/components/ui/button"
@@ -16,6 +17,8 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@/components/ui/dialog"
+import { ONGOING_WORKFLOW_RUNS_QUERY_KEY } from "@/lib/ongoingWorkflowRunsQuery"
+import { isPwaStandalone } from "@/lib/pwa"
 import { readStoredUpdateNotesFallbackNoteId } from "@/lib/updateNotesFallback"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, useRouterState } from "@tanstack/react-router"
@@ -87,8 +90,12 @@ export function HomeLayout({ children }: HomeLayoutProps) {
 				body_md,
 				...(fallback_note_id ? { fallback_note_id } : {}),
 			})
+			if (isPwaStandalone()) {
+				window.location.reload()
+				return
+			}
 			void queryClient.invalidateQueries({
-				queryKey: ["workflowRuns", "ongoing"],
+				queryKey: ONGOING_WORKFLOW_RUNS_QUERY_KEY,
 			})
 			void queryClient.invalidateQueries({
 				queryKey: [...MY_EXTERNAL_NOTE_UPDATES_QUERY_KEY],
@@ -250,16 +257,15 @@ export function HomeLayout({ children }: HomeLayoutProps) {
 							>
 								Update text
 							</label>
-							<textarea
+							<MarkdownEditor
+								variant="chunk"
+								preview="edit"
 								id="update-notes-body"
+								className="w-full"
 								value={updateNotesText}
-								onChange={(e) =>
-									setUpdateNotesText(e.target.value)
-								}
-								rows={14}
-								placeholder="Write what you want reflected in your notes…"
+								onChange={setUpdateNotesText}
 								disabled={updateNotesSubmitting}
-								className="w-full resize-y rounded-lg border border-input bg-background px-3 py-2.5 text-sm leading-relaxed"
+								placeholder="Write what you want reflected in your notes…"
 							/>
 							{updateNotesError ? (
 								<p

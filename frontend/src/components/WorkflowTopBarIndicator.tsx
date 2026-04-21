@@ -1,19 +1,30 @@
-import { RunService } from "@/client/services"
-import { useQuery } from "@tanstack/react-query"
+import {
+	ONGOING_WORKFLOW_RUNS_QUERY_KEY,
+	ongoingWorkflowRunsQueryOptions,
+} from "@/lib/ongoingWorkflowRunsQuery"
+import { isPwaStandalone } from "@/lib/pwa"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useEffect } from "react"
 
 export function WorkflowTopBarIndicator() {
+	const queryClient = useQueryClient()
 	const { data } = useQuery({
-		queryKey: ["workflowRuns", "ongoing"],
-		queryFn: () =>
-			RunService.listRuns({
-				status: ["pending", "started"],
-				deleted: [false],
-				limit: 1,
-				skip: 0,
-			}),
-		refetchInterval: (query) =>
-			query.state.data && query.state.data.count > 0 ? 5000 : 20000,
+		queryKey: ONGOING_WORKFLOW_RUNS_QUERY_KEY,
+		...ongoingWorkflowRunsQueryOptions(),
 	})
+
+	useEffect(() => {
+		if (!isPwaStandalone()) return
+		const onVisibility = () => {
+			if (document.visibilityState !== "visible") return
+			void queryClient.invalidateQueries({
+				queryKey: ONGOING_WORKFLOW_RUNS_QUERY_KEY,
+			})
+		}
+		document.addEventListener("visibilitychange", onVisibility)
+		return () =>
+			document.removeEventListener("visibilitychange", onVisibility)
+	}, [queryClient])
 
 	const n = data?.count ?? 0
 	if (n === 0) return null

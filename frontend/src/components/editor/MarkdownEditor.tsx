@@ -110,6 +110,9 @@ type MarkdownEditorProps = {
 	id?: string
 	preview?: "edit" | "live" | "preview"
 	className?: string
+	/** When true, the editor is read-only (e.g. while a form is submitting). */
+	disabled?: boolean
+	placeholder?: string
 }
 
 export function MarkdownEditor({
@@ -119,6 +122,8 @@ export function MarkdownEditor({
 	id,
 	preview = "live",
 	className,
+	disabled = false,
+	placeholder,
 }: MarkdownEditorProps) {
 	const { resolvedTheme } = useTheme()
 	const colorMode: "light" | "dark" =
@@ -264,9 +269,10 @@ export function MarkdownEditor({
 				"markdown-editor-shell relative overflow-hidden rounded-md border border-input bg-background text-foreground",
 				"[&_.w-md-editor]:bg-transparent [&_.w-md-editor-toolbar]:border-border [&_.w-md-editor-toolbar]:bg-muted/40",
 				"[&_.w-md-editor-content]:bg-background",
+				disabled && "pointer-events-none opacity-60",
 				className,
 			)}
-			onPasteCapture={onPasteCapture}
+			onPasteCapture={disabled ? undefined : onPasteCapture}
 			aria-busy={imagePasteLoading}
 		>
 			<MDEditor
@@ -277,7 +283,12 @@ export function MarkdownEditor({
 				visibleDragbar={variant !== "chunk"}
 				data-color-mode={colorMode}
 				previewOptions={{ components: authMarkdownImageComponents }}
-				textareaProps={{ id, spellCheck: true }}
+				textareaProps={{
+					id,
+					spellCheck: true,
+					readOnly: disabled,
+					...(placeholder ? { placeholder } : {}),
+				}}
 				enableScroll
 			/>
 			{imagePasteLoading ? (

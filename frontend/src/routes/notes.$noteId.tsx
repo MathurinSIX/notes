@@ -18,13 +18,16 @@ import {
 	type ExternalNoteUpdateOut,
 } from "@/api/notes"
 import { ApiError } from "@/client"
-import { RunService } from "@/client/services"
 import { LineDiffBlock } from "@/components/diff/LineDiffBlock"
 import { MarkdownEditor } from "@/components/editor/MarkdownEditor"
 import { MarkdownPreview } from "@/components/editor/MarkdownPreview"
 import { FollowUpSourceModal } from "@/components/FollowUpSourceModal"
 import { FollowUpSourceButton } from "@/components/IncomingUpdateSourceHint"
 import { HomeLayout } from "@/components/layouts/HomeLayout"
+import {
+	ONGOING_WORKFLOW_RUNS_QUERY_KEY,
+	ongoingWorkflowRunsQueryOptions,
+} from "@/lib/ongoingWorkflowRunsQuery"
 import { Button } from "@/components/ui/button"
 import {
 	Dialog,
@@ -246,16 +249,8 @@ function NoteDetailPage() {
 	const [hadOngoingWorkflows, setHadOngoingWorkflows] = useState(false)
 	const navigate = useNavigate()
 	const { data: ongoingRunsData } = useQuery({
-		queryKey: ["workflowRuns", "ongoing"],
-		queryFn: () =>
-			RunService.listRuns({
-				status: ["pending", "started"],
-				deleted: [false],
-				limit: 1,
-				skip: 0,
-			}),
-		refetchInterval: (query) =>
-			query.state.data && query.state.data.count > 0 ? 5000 : 20000,
+		queryKey: ONGOING_WORKFLOW_RUNS_QUERY_KEY,
+		...ongoingWorkflowRunsQueryOptions(),
 	})
 
 	useEffect(() => {
