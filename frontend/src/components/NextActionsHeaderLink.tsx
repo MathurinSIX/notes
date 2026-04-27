@@ -28,7 +28,7 @@ export function NextActionsHeaderLink() {
 		<Link
 			to="/notes/actions"
 			className={cn(
-				"inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground transition-colors hover:text-primary",
+				"inline-flex items-center gap-1 text-xs font-medium text-muted-foreground transition-colors hover:text-primary",
 				n > 0 && "text-teal-800 dark:text-teal-200",
 			)}
 		>

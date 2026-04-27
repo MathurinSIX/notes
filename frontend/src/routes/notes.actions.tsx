@@ -359,31 +359,7 @@ function ActionsPage() {
 
 	return (
 		<HomeLayout>
-			<div className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-6 pb-10 pt-5">
-				<div className="space-y-2">
-					<h1 className="bg-gradient-to-r from-foreground via-teal-700 to-chart-4 bg-clip-text text-2xl font-semibold tracking-tight text-transparent dark:from-foreground dark:via-teal-300 dark:to-chart-4">
-						Actions
-					</h1>
-					<p className="text-sm text-muted-foreground">
-						{loading
-							? "Loading…"
-							: !hasAny
-							  ? "No follow-ups on active notes"
-							  : [
-										hasOpen
-											? `${nextActions.length} open follow-up${
-													nextActions.length === 1 ? "" : "s"
-												}`
-											: null,
-										hasDone
-											? `${recentDoneActions.length} completed (recent)`
-											: null,
-									]
-										.filter(Boolean)
-										.join(" · ")}
-					</p>
-				</div>
-
+			<div className="flex w-full flex-col gap-3 px-3 pb-6 pt-3 sm:px-4">
 				{error && (
 					<div
 						role="alert"

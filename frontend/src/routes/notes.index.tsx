@@ -1,7 +1,6 @@
 import { type NotesListItem, createNote, listNotes } from "@/api/notes"
 import { ApiError } from "@/client"
 import { NOTES_NEXT_ACTIONS_HEADER_QUERY_KEY } from "@/components/NextActionsHeaderLink"
-import { useOpenUpdateNotesModal } from "@/components/UpdateNotesModalContext"
 import { HomeLayout } from "@/components/layouts/HomeLayout"
 import { Button } from "@/components/ui/button"
 import { ensureLoggedIn } from "@/hooks/useAuth"
@@ -23,7 +22,6 @@ const CARD_TOP_ACCENT = [
 ] as const
 
 function NotesPage() {
-	const openUpdateNotesModal = useOpenUpdateNotesModal()
 	const [mounted, setMounted] = useState(false)
 	const [authChecked, setAuthChecked] = useState(false)
 	const [loggedIn, setLoggedIn] = useState(false)
@@ -97,80 +95,51 @@ function NotesPage() {
 
 	return (
 		<HomeLayout>
-			<div className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-6 pb-10 pt-5">
-				<div className="flex flex-wrap items-end justify-between gap-3">
-					<div className="min-w-0 flex-1 space-y-2">
-						<div>
-							<h1 className="bg-gradient-to-r from-foreground via-primary to-chart-4 bg-clip-text text-2xl font-semibold tracking-tight text-transparent dark:from-foreground dark:via-chart-2 dark:to-chart-4">
-								Notes
-							</h1>
-							<p className="mt-1 text-sm text-muted-foreground">
-								{loading
-									? "Loading…"
-									: notes.length === 0
-									  ? listView === "archived"
-											? "No archived notes"
-											: "Start your first note"
-									  : `${notes.length} ${
-												notes.length === 1
-													? "note"
-													: "notes"
-										  }`}
-							</p>
-						</div>
-						<div
-							className="inline-flex rounded-lg border border-primary/15 bg-gradient-to-r from-muted/40 via-primary/[0.07] to-chart-5/[0.08] p-1 dark:border-primary/25 dark:from-muted/25 dark:via-chart-3/10 dark:to-chart-4/10"
-							role="tablist"
-							aria-label="Note list"
+			<div className="flex w-full flex-col gap-3 px-3 pb-6 pt-3 sm:px-4">
+				<div className="flex flex-wrap items-center justify-between gap-2">
+					<div
+						className="inline-flex rounded-md border border-border bg-muted/30 p-0.5"
+						role="tablist"
+						aria-label="Note list"
+					>
+						<button
+							type="button"
+							role="tab"
+							aria-selected={listView === "active"}
+							className={cn(
+								"rounded px-2.5 py-1 text-xs font-medium transition-colors",
+								listView === "active"
+									? "bg-background text-foreground shadow-sm"
+									: "text-muted-foreground hover:text-foreground",
+							)}
+							onClick={() => setListView("active")}
 						>
-							<button
-								type="button"
-								role="tab"
-								aria-selected={listView === "active"}
-								className={cn(
-									"rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
-									listView === "active"
-										? "bg-background text-primary shadow-sm ring-1 ring-primary/15 dark:bg-background/90"
-										: "text-muted-foreground hover:text-foreground",
-								)}
-								onClick={() => setListView("active")}
-							>
-								Active
-							</button>
-							<button
-								type="button"
-								role="tab"
-								aria-selected={listView === "archived"}
-								className={cn(
-									"rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
-									listView === "archived"
-										? "bg-background text-amber-700 shadow-sm ring-1 ring-amber-500/25 dark:bg-background/90 dark:text-amber-400 dark:ring-amber-500/30"
-										: "text-muted-foreground hover:text-foreground",
-								)}
-								onClick={() => setListView("archived")}
-							>
-								Archived
-							</button>
-						</div>
+							Active
+						</button>
+						<button
+							type="button"
+							role="tab"
+							aria-selected={listView === "archived"}
+							className={cn(
+								"rounded px-2.5 py-1 text-xs font-medium transition-colors",
+								listView === "archived"
+									? "bg-background text-amber-700 shadow-sm dark:text-amber-400"
+									: "text-muted-foreground hover:text-foreground",
+							)}
+							onClick={() => setListView("archived")}
+						>
+							Archived
+						</button>
 					</div>
 					{listView === "active" ? (
-						<div className="flex flex-wrap items-center gap-2">
-							{openUpdateNotesModal ? (
-								<Button
-									type="button"
-									variant="updateNotes"
-									onClick={openUpdateNotesModal}
-								>
-									Update notes
-								</Button>
-							) : null}
-							<Button
-								type="button"
-								onClick={() => void handleNewNote()}
-							>
-								New note
-							</Button>
-						</div>
+						<Button
+							type="button"
+							size="sm"
+							className="h-7 text-xs"
+							onClick={() => void handleNewNote()}
+						>
+							New note
+						</Button>
 					) : null}
 				</div>
 				{error && (
@@ -261,9 +230,9 @@ function NotesPage() {
 														</span>
 													) : null}
 												</div>
-												{n.summary?.trim() ? (
+												{n.description?.trim() ? (
 													<p className="line-clamp-3 text-sm leading-relaxed text-muted-foreground">
-														{n.summary.trim()}
+														{n.description.trim()}
 													</p>
 												) : null}
 												<div className="mt-auto flex items-center justify-between gap-2 border-t border-border/60 pt-2">

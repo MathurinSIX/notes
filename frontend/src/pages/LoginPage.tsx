@@ -19,7 +19,7 @@ export function LoginPage() {
 		setMounted(true)
 		ensureLoggedIn().then((loggedIn) => {
 			if (loggedIn) {
-				navigate({ to: "/notes" })
+				navigate({ to: "/" })
 			}
 		})
 	}, [navigate])
@@ -34,7 +34,7 @@ export function LoginPage() {
 				password,
 			})
 			setTokens(token.access_token, token.refresh_token)
-			navigate({ to: "/notes" })
+			navigate({ to: "/" })
 		} catch (e) {
 			if (e instanceof ApiError && e.status === 401) {
 				setError("Incorrect username or password.")

@@ -1,3 +1,4 @@
+import uuid
 from typing import Annotated
 
 from fastapi import BackgroundTasks, Depends
@@ -61,9 +62,27 @@ class WorkflowService:
             data=UpdateNotesWorkflowRunParams(
                 external_note_update_id=row.id,
                 fallback_note_id=data.fallback_note_id,
+                force_matched_note_id=data.force_matched_note_id,
             ),
         )
         return UpdateNotesWorkflowResponse(external_note_update_id=row.id)
+
+    def enqueue_update_notes_rerun(
+        self,
+        *,
+        external_note_update_id: uuid.UUID,
+        fallback_note_id: uuid.UUID | None,
+        force_matched_note_id: uuid.UUID | None,
+    ) -> None:
+        self.background_tasks.add_task(
+            safe_background_task,
+            self.update_notes_workflow_task.run,
+            data=UpdateNotesWorkflowRunParams(
+                external_note_update_id=external_note_update_id,
+                fallback_note_id=fallback_note_id,
+                force_matched_note_id=force_matched_note_id,
+            ),
+        )
 
 
 WorkflowServiceDep = Annotated[WorkflowService, Depends(WorkflowService)]

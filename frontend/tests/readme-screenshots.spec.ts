@@ -140,7 +140,7 @@ test("README screenshots", async ({ page, context }) => {
 				data: Array<{
 					id: string
 					title: string | null
-					summary: string | null
+					description: string | null
 					archived: boolean
 					updated_ts: string
 					created_ts: string
@@ -171,7 +171,7 @@ test("README screenshots", async ({ page, context }) => {
 							note_id: mockActionsNoteId,
 							note_title: mockActionsNoteTitle,
 							task_id: "00000000-0000-4000-8000-000000000002",
-							task_title: "Draft note summary",
+							task_title: "Draft note description",
 							due_at: null,
 							done_updated_ts: nowIso,
 						},
@@ -246,8 +246,8 @@ test("README screenshots", async ({ page, context }) => {
 			}),
 			data: JSON.stringify({
 				title: "README screenshot note",
-				summary:
-					"Sample title, summary, and markdown section for documentation captures.",
+				description:
+					"Sample title, description, and markdown section for documentation captures.",
 			}),
 		},
 	)
@@ -349,7 +349,7 @@ test("README screenshots", async ({ page, context }) => {
 	})
 	await page.getByLabel("Update text").fill(
 		[
-			"Weekly sync summary:",
+			"Weekly sync update:",
 			"- API contract finalized",
 			"- Need follow-up with design on empty states",
 			"- Move release checklist to next Friday",

@@ -23,7 +23,6 @@ from app.api.routes.note.schemas import (
     ChunkUpdate,
     ExternalNoteUpdatePatch,
     NoteTaskMergeItem,
-    NoteUpdate,
 )
 from app.api.routes.run.repository import RunRepository
 from app.api.routes.run_step.repository import RunStepRepository
@@ -39,7 +38,16 @@ class UpdateNotesWorkflowInput(BaseModel):
         default=None,
         description=(
             "When set and the match step returns no/invalid note id, merge into "
-            "this note if it belongs to the user and is not archived."
+            "this note if it belongs to the user and is not archived. "
+            "When omitted (typical automatic mode), a non-match sets status "
+            "awaiting_note for the user to pick a note on the Updates page."
+        ),
+    )
+    force_matched_note_id: uuid.UUID | None = Field(
+        default=None,
+        description=(
+            "When set to one of the user's active notes, skip the match step and "
+            "merge into this note."
         ),
     )
 
@@ -47,6 +55,7 @@ class UpdateNotesWorkflowInput(BaseModel):
 class UpdateNotesWorkflowRunParams(BaseModel):
     external_note_update_id: uuid.UUID
     fallback_note_id: uuid.UUID | None = None
+    force_matched_note_id: uuid.UUID | None = None
 
 
 class NoteMatchResult(BaseModel):
@@ -68,10 +77,6 @@ class PlannedChunk(BaseModel):
 class NoteMergePlan(BaseModel):
     chunks: list[PlannedChunk] = Field(
         description="Full list of sections after merging the update into the note"
-    )
-    note_summary: str | None = Field(
-        default=None,
-        description="Concise summary of the note after the merge (1–3 sentences)",
     )
     modify_tasks: bool = Field(
         default=False,
@@ -114,6 +119,14 @@ class UpdateNotesWorkflowTask:
             user = await session.get(User, ext_row.creator_id)
             if not user:
                 logging.error("update-notes: creator user missing for update %s", ext_row.id)
+                return
+
+            if ext_row.status != "pending":
+                logging.info(
+                    "update-notes: skip run for update %s (status=%s)",
+                    ext_row.id,
+                    ext_row.status,
+                )
                 return
 
             run_repo = RunRepository(session, user)
@@ -164,76 +177,108 @@ class UpdateNotesWorkflowTask:
                         {
                             "id": str(n.id),
                             "title": n.title or "",
-                            "summary": (n.summary or "").strip(),
+                            "description": (n.description or "").strip(),
                         }
                         for n in notes
                     ]
                     update_text = ext_row.body_md.strip()
+                    valid_ids = {n["id"] for n in note_cards}
 
-                    async with loggers.logger_step(
-                        name="Match note (OpenAI)",
-                        description="Pick best note using summaries",
-                        wait_for=WaitForInput(
-                            exp="UpdateNotesMatch%",
-                            max_simultaneous_steps=2,
-                        ),
-                    ) as metrics:
-                        model = _llm()
-                        structured = model.with_structured_output(
-                            NoteMatchResult, include_raw=True
+                    force_id = data.force_matched_note_id
+                    if force_id is not None and str(force_id) in valid_ids:
+                        matched_uuid = force_id
+                        logging.info(
+                            "update-notes: using forced target note %s (skip matcher)",
+                            matched_uuid,
                         )
-                        prompt = f"""You help route incoming text to the user's existing note that it belongs with.
+                        await ext_repo.update(
+                            ext_row.id,
+                            ExternalNoteUpdatePatch(matched_note_id=matched_uuid),
+                        )
+                    else:
+                        if force_id is not None:
+                            logging.warning(
+                                "update-notes: force_matched_note_id %s not in candidates; "
+                                "falling back to matcher",
+                                force_id,
+                            )
+
+                        async with loggers.logger_step(
+                            name="Match note (OpenAI)",
+                            description="Pick best note using title and description",
+                            wait_for=WaitForInput(
+                                exp="UpdateNotesMatch%",
+                                max_simultaneous_steps=2,
+                            ),
+                        ) as metrics:
+                            model = _llm()
+                            structured = model.with_structured_output(
+                                NoteMatchResult, include_raw=True
+                            )
+                            prompt = f"""You help route incoming text to the user's existing note that it belongs with.
 
 Incoming update (raw text from the user):
 ---
 {update_text}
 ---
 
-Candidate notes (use id, title, and summary only):
+Candidate notes (use id, title, and description only — do not infer from section bodies):
 {json.dumps(note_cards, indent=2)}
 
-Return matched_note_id for the single best-fitting note. If several could work, pick the closest by topic; if still ambiguous, prefer the note whose id appears first in the candidate list (most recently updated)."""
-                        start = time.time()
-                        result = await structured.ainvoke(prompt)
-                        parsed = result.get("parsed")
-                        if not isinstance(parsed, NoteMatchResult):
-                            raise ValueError("OpenAI match step returned no structured result")
-                        raw = result["raw"]
-                        if raw and getattr(raw, "response_metadata", None):
-                            tu = raw.response_metadata.get("token_usage")
-                            if tu:
-                                set_token_usage(token_usage=tu, metrics=metrics)
-                        logging.info(
-                            "update-notes: match done in %.2fs, note=%s",
-                            time.time() - start,
-                            parsed.matched_note_id,
-                        )
+Compare the incoming text to each candidate's title and description only (not section bodies).
 
-                    matched_id = parsed.matched_note_id
-                    valid_ids = {n["id"] for n in note_cards}
-                    if matched_id is None or str(matched_id) not in valid_ids:
-                        fb = data.fallback_note_id
-                        if fb is not None and str(fb) in valid_ids:
-                            matched_uuid = fb
+When one note clearly fits, return its matched_note_id. When several could reasonably fit, pick the closest by topic; if still tied, prefer the id that appears first in the candidate list (most recently updated).
+
+When none of the candidates is a reasonable fit at all, return matched_note_id as null—do not pick a note just to return something."""
+                            start = time.time()
+                            result = await structured.ainvoke(prompt)
+                            parsed = result.get("parsed")
+                            if not isinstance(parsed, NoteMatchResult):
+                                raise ValueError(
+                                    "OpenAI match step returned no structured result"
+                                )
+                            raw = result["raw"]
+                            if raw and getattr(raw, "response_metadata", None):
+                                tu = raw.response_metadata.get("token_usage")
+                                if tu:
+                                    set_token_usage(token_usage=tu, metrics=metrics)
                             logging.info(
-                                "update-notes: no/invalid LLM match; using client fallback note %s",
-                                matched_uuid,
+                                "update-notes: match done in %.2fs, note=%s",
+                                time.time() - start,
+                                parsed.matched_note_id,
                             )
+
+                        matched_id = parsed.matched_note_id
+                        if matched_id is not None and str(matched_id) in valid_ids:
+                            matched_uuid = matched_id
                         else:
-                            # Candidates are ordered by updated_ts desc; never end as no_match.
-                            matched_uuid = notes[0].id
-                            logging.info(
-                                "update-notes: no/invalid LLM match; using latest modified note %s",
-                                matched_uuid,
-                            )
-                    else:
-                        matched_uuid = matched_id
-                    await ext_repo.update(
-                        ext_row.id,
-                        ExternalNoteUpdatePatch(
-                            matched_note_id=matched_uuid,
-                        ),
-                    )
+                            fb = data.fallback_note_id
+                            if fb is not None and str(fb) in valid_ids:
+                                matched_uuid = fb
+                                logging.info(
+                                    "update-notes: no/invalid LLM match; using client fallback note %s",
+                                    matched_uuid,
+                                )
+                            else:
+                                await ext_repo.update(
+                                    ext_row.id,
+                                    ExternalNoteUpdatePatch(
+                                        status="awaiting_note",
+                                        matched_note_id=None,
+                                    ),
+                                )
+                                run_context.output = {
+                                    "status": "awaiting_note",
+                                    "reason": "no_confident_match",
+                                }
+                                return
+
+                        await ext_repo.update(
+                            ext_row.id,
+                            ExternalNoteUpdatePatch(
+                                matched_note_id=matched_uuid,
+                            ),
+                        )
 
                     note = await note_repo.read_by_id(matched_uuid)
                     chunks_sorted = sorted(
@@ -285,7 +330,6 @@ Incoming update:
 ---
 
 Current note title: {note.title or ""}
-Current note summary: {(note.summary or "").strip()}
 
 Current sections (each has stable id — reuse ids for sections you keep or edit; use null id only for brand-new sections):
 {json.dumps(chunk_payload, indent=2)}
@@ -300,7 +344,6 @@ Rules:
 - Remove sections by omitting their ids entirely.
 - Preserve meaning; integrate the update text into the note naturally (edit, split, or add sections as needed).
 - Follow-ups vs sections: `tasks` and markdown sections are independent. If you add something as a follow-up task, you do not need to repeat it as a new or edited section—only put it in `chunks` when the incoming text is substantive note body (explanations, context, lists meant to live in the note), not merely because it also appears in `tasks`.
-- Set `note_summary` to a fresh short summary of the note after the merge (or null to leave summary unchanged).
 - Tasks: set `modify_tasks` to true only when the incoming update adds, removes, completes, or reorders follow-ups, or when a short message is clearly about checking tasks off (then return the same tasks with updated `done` and matching `id`). Otherwise set `modify_tasks` to false and ignore `tasks`.
 - When `modify_tasks` is true, `tasks` must list every task that should exist afterward (empty list clears all). Each item uses `existing_task_id` for tasks you keep from the current list, or null for new tasks. Set `done` true/false per row. Use concise `title` text.
 - Optional `due_at` per task: ISO 8601 datetime when the update implies a deadline, or null for none. Preserve existing `due_at` for tasks you keep unless the update changes it."""
@@ -411,21 +454,6 @@ Rules:
                                     editor_id=user.id,
                                     external_note_update_id=ext_row.id,
                                 )
-
-                        if plan.note_summary is not None:
-                            await note_repo.update(
-                                matched_uuid,
-                                NoteUpdate(summary=plan.note_summary.strip() or None),
-                            )
-                            note_after = await note_repo.read_by_id(matched_uuid)
-                            await timeline.record_note_snapshot(
-                                note_id=matched_uuid,
-                                title=note_after.title,
-                                summary=note_after.summary,
-                                archived=note_after.archived,
-                                editor_id=user.id,
-                                external_note_update_id=ext_row.id,
-                            )
 
                         if plan.modify_tasks:
                             task_repo = NoteTaskRepository(session, user)

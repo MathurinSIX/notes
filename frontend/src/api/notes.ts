@@ -34,7 +34,7 @@ export type NoteTaskOut = {
 export type NoteOut = {
 	id: string
 	title: string | null
-	summary: string | null
+	description: string | null
 	archived: boolean
 	full_markdown: string
 	chunks: ChunkOut[]
@@ -47,7 +47,7 @@ export type NoteOut = {
 export type NotesListItem = {
 	id: string
 	title: string | null
-	summary: string | null
+	description: string | null
 	archived: boolean
 	updated_ts: string
 	created_ts: string
@@ -81,7 +81,7 @@ export type NoteHistoryEvent = {
 	id: string
 	changed_ts: string
 	title: string | null
-	summary: string | null
+	description: string | null
 	archived: boolean
 	external_note_update_id?: string | null
 }
@@ -235,6 +235,21 @@ export async function listMyExternalNoteUpdates(params?: {
 	}) as Promise<ExternalNoteUpdatesPageResponse>
 }
 
+/** Restore the matched note to its state before this merge (history must match). */
+export async function undoSentExternalNoteUpdate(
+	updateId: string,
+): Promise<ExternalNoteUpdateOut> {
+	return request<ExternalNoteUpdateOut>(OpenAPI, {
+		method: "POST",
+		url: `/notes/sent-updates/${updateId}/undo`,
+		errors: {
+			400: "Bad Request",
+			409: "Conflict",
+			422: "Validation Error",
+		},
+	}) as Promise<ExternalNoteUpdateOut>
+}
+
 export async function getChunkHistory(
 	noteId: string,
 	chunkId: string,
@@ -254,7 +269,7 @@ export async function updateNote(
 	id: string,
 	body: {
 		title?: string | null
-		summary?: string | null
+		description?: string | null
 		archived?: boolean
 	},
 ): Promise<NoteOut> {
@@ -287,7 +302,7 @@ export async function patchNoteTask(
 
 export async function createNote(body?: {
 	title?: string | null
-	summary?: string | null
+	description?: string | null
 }): Promise<NoteOut> {
 	return request<NoteOut>(OpenAPI, {
 		method: "POST",

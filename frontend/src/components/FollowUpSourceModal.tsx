@@ -30,6 +30,8 @@ function incomingUpdateStatusClass(status: string): string {
 			return "bg-rose-500/15 text-rose-950 dark:text-rose-50"
 		case "no_match":
 			return "bg-muted text-muted-foreground"
+		case "awaiting_note":
+			return "bg-sky-500/15 text-sky-950 dark:text-sky-100"
 		default:
 			return "bg-muted text-foreground"
 	}

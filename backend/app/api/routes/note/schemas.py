@@ -8,20 +8,20 @@ from sqlmodel import Field, SQLModel
 
 class NoteCreate(SQLModel):
     title: str | None = None
-    summary: str | None = None
+    description: str | None = None
 
 
 class NoteCreateInternal(SQLModel):
     """Row payload for repository create (creator from auth)."""
 
     title: str | None = None
-    summary: str | None = None
+    description: str | None = None
     creator_id: uuid.UUID
 
 
 class NoteUpdate(SQLModel):
     title: str | None = None
-    summary: str | None = None
+    description: str | None = None
     archived: bool | None = None
 
 
@@ -114,7 +114,7 @@ class NoteTaskMergeItem(SQLModel):
 class NoteOut(SQLModel):
     id: uuid.UUID
     title: str | None
-    summary: str | None
+    description: str | None
     archived: bool
     full_markdown: str
     chunks: list[ChunkOut]
@@ -126,7 +126,7 @@ class NoteOut(SQLModel):
 class Notes(SQLModel):
     id: uuid.UUID
     title: str | None
-    summary: str | None
+    description: str | None
     archived: bool
     updated_ts: datetime
     created_ts: datetime
@@ -180,7 +180,7 @@ class NoteHistoryEvent(SQLModel):
     id: uuid.UUID
     changed_ts: datetime
     title: str | None
-    summary: str | None
+    description: str | None
     archived: bool
     external_note_update_id: uuid.UUID | None = None
 
@@ -239,6 +239,12 @@ class ExternalNoteUpdatePatch(SQLModel):
     status: str | None = None
     matched_note_id: uuid.UUID | None = None
     error_message: str | None = None
+
+
+class SentExternalNoteReapplyBody(SQLModel):
+    """Re-run a merged update against a specific note after undo (skips matcher)."""
+
+    target_note_id: uuid.UUID
 
 
 class UpdateNotesWorkflowResponse(SQLModel):

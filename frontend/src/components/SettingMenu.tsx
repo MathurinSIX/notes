@@ -19,8 +19,13 @@ export default function SettingMenu() {
 	return (
 		<DropdownMenu>
 			<DropdownMenuTrigger asChild>
-				<Button variant="ghost" size="icon" aria-label="Settings">
-					<MdSettings className="h-[18px] w-[18px]" />
+				<Button
+					variant="ghost"
+					size="icon"
+					className="h-7 w-7 shrink-0"
+					aria-label="Settings"
+				>
+					<MdSettings className="h-4 w-4" />
 				</Button>
 			</DropdownMenuTrigger>
 			<DropdownMenuContent>

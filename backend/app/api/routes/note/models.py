@@ -41,7 +41,7 @@ class Note(SQLModel, table=True):
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     title: str | None = Field(default=None, max_length=500)
-    summary: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
+    description: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     archived: bool = Field(default=False)
     creator_id: uuid.UUID = Field(foreign_key="user.id", ondelete="CASCADE")
     updated_ts: datetime = Field(
@@ -142,7 +142,7 @@ class Chunk(SQLModel, table=True):
 
 
 class NoteHistory(SQLModel, table=True):
-    """Append-only snapshots when note title, summary, or archive state changes."""
+    """Append-only snapshots when note title, description, or archive state changes."""
 
     __tablename__ = "note_history"
 
@@ -158,7 +158,7 @@ class NoteHistory(SQLModel, table=True):
     )
     changed_ts: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     title: str | None = Field(default=None, max_length=500)
-    summary: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
+    description: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     archived: bool = Field(default=False)
 
 

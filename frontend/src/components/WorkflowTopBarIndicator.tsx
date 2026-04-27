@@ -31,7 +31,7 @@ export function WorkflowTopBarIndicator() {
 
 	return (
 		<div
-			className="ml-4 flex min-w-0 flex-1 items-center justify-center gap-2 px-2"
+			className="ml-1 flex min-w-0 flex-1 items-center justify-center gap-1.5 px-1 sm:ml-2 sm:px-2"
 			role="status"
 			aria-live="polite"
 			aria-label={
@@ -41,13 +41,11 @@ export function WorkflowTopBarIndicator() {
 			}
 		>
 			<span
-				className="h-2 w-2 shrink-0 rounded-full bg-amber-500 animate-pulse"
+				className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500 animate-pulse"
 				aria-hidden
 			/>
-			<span className="truncate text-sm text-muted-foreground">
-				{n === 1
-					? "Workflow in progress"
-					: `${n} workflows in progress`}
+			<span className="truncate text-xs text-muted-foreground">
+				{n === 1 ? "Running…" : `${n} running`}
 			</span>
 		</div>
 	)

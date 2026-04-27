@@ -1,7 +1,10 @@
 import uuid
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Body, Query, status
+from fastapi import APIRouter, Body, HTTPException, Query, status
+
+from app.api.routes.workflow.service import WorkflowServiceDep
+from app.core.config import settings
 
 from .schemas import (
     ChunkCreate,
@@ -12,16 +15,23 @@ from .schemas import (
     ExternalNoteUpdatesOut,
     ExternalNoteUpdatesPageOut,
     NoteCreate,
+    SentExternalNoteReapplyBody,
     NoteOut,
     NotesOut,
     NoteTaskPatch,
     NoteTimelineOut,
     NoteUpdate,
+    UpdateNotesWorkflowResponse,
 )
 from .service import ChunkServiceDep, NoteServiceDep
 
 router = APIRouter(prefix="/notes", tags=["Notes"])
 chunks_router = APIRouter(prefix="/chunks", tags=["Notes"])
+
+OPENAI_KEY_ERROR_MSG = (
+    "OPENAI_API_KEY is not configured. "
+    "Set OPENAI_API_KEY in your environment to use the update-notes workflow."
+)
 
 
 @router.get(
@@ -35,6 +45,51 @@ async def list_sent_external_note_updates(
     limit: int = Query(100, ge=1, le=200),
 ) -> Any:
     return await service.list_my_external_note_updates(skip=skip, limit=limit)
+
+
+@router.post(
+    "/sent-updates/{update_id}/undo",
+    response_model=ExternalNoteUpdateOut,
+    status_code=status.HTTP_200_OK,
+)
+async def undo_sent_external_note_update(
+    service: NoteServiceDep,
+    update_id: uuid.UUID,
+) -> Any:
+    """Restore the matched note to its pre-merge state using stored history."""
+    return await service.undo_merged_external_note_update(update_id)
+
+
+@router.post(
+    "/sent-updates/{update_id}/reapply",
+    response_model=UpdateNotesWorkflowResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def reapply_sent_external_note_update(
+    note_service: NoteServiceDep,
+    workflow_service: WorkflowServiceDep,
+    update_id: uuid.UUID,
+    body: SentExternalNoteReapplyBody,
+) -> Any:
+    """
+    Undo the merge if it is still applied (when status is merged), point the stored
+    update at another note, and queue the merge workflow again (matcher skipped).
+
+    When status is awaiting_note (automatic match found no note), skips undo and
+    only queues merge into target_note_id.
+    """
+    if not settings.OPENAI_API_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=OPENAI_KEY_ERROR_MSG,
+        )
+    await note_service.prepare_sent_update_merge_rerun(update_id, body.target_note_id)
+    workflow_service.enqueue_update_notes_rerun(
+        external_note_update_id=update_id,
+        fallback_note_id=body.target_note_id,
+        force_matched_note_id=body.target_note_id,
+    )
+    return UpdateNotesWorkflowResponse(external_note_update_id=update_id)
 
 
 @router.get("/{note_id}", response_model=NoteOut, status_code=status.HTTP_200_OK)

@@ -1,7 +1,6 @@
 import { listNotes, MY_EXTERNAL_NOTE_UPDATES_QUERY_KEY } from "@/api/notes"
 import { startUpdateNotesWorkflow } from "@/api/workflow"
 import { ApiError } from "@/client"
-import Breadcrumb from "@/components/Breadcrumb"
 import { NextActionsHeaderLink } from "@/components/NextActionsHeaderLink"
 import { ProjectLogo } from "@/components/ProjectLogo"
 import SettingMenu from "@/components/SettingMenu"
@@ -19,18 +18,9 @@ import {
 } from "@/components/ui/dialog"
 import { ONGOING_WORKFLOW_RUNS_QUERY_KEY } from "@/lib/ongoingWorkflowRunsQuery"
 import { isPwaStandalone } from "@/lib/pwa"
-import { readStoredUpdateNotesFallbackNoteId } from "@/lib/updateNotesFallback"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { Link, useRouterState } from "@tanstack/react-router"
+import { Link } from "@tanstack/react-router"
 import { useEffect, useMemo, useState } from "react"
-
-const NOTE_DETAIL_UUID_RE =
-	/^\/notes\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i
-
-function fallbackNoteIdFromPathname(pathname: string): string | undefined {
-	const m = pathname.match(NOTE_DETAIL_UUID_RE)
-	return m?.[1]
-}
 
 interface HomeLayoutProps {
 	children: React.ReactNode
@@ -39,16 +29,6 @@ interface HomeLayoutProps {
 export function HomeLayout({ children }: HomeLayoutProps) {
 	const borderColor = useColorModeValue("border-gray-200", "border-gray-800")
 	const queryClient = useQueryClient()
-	const pathname = useRouterState({ select: (s) => s.location.pathname })
-	const noteIdFromPath = useMemo(
-		() => fallbackNoteIdFromPathname(pathname),
-		[pathname],
-	)
-	const updateNotesAutoFallbackNoteId = useMemo(() => {
-		return (
-			noteIdFromPath ?? readStoredUpdateNotesFallbackNoteId() ?? undefined
-		)
-	}, [noteIdFromPath, pathname])
 	const [updateNotesOpen, setUpdateNotesOpen] = useState(false)
 	const [updateNotesTargetNoteId, setUpdateNotesTargetNoteId] = useState<
 		string | null
@@ -82,13 +62,13 @@ export function HomeLayout({ children }: HomeLayoutProps) {
 		setUpdateNotesSubmitting(true)
 		setUpdateNotesError(null)
 		try {
-			const fallback_note_id =
-				(updateNotesTargetNoteId && updateNotesTargetNoteId.length > 0
+			const picked =
+				updateNotesTargetNoteId && updateNotesTargetNoteId.length > 0
 					? updateNotesTargetNoteId
-					: updateNotesAutoFallbackNoteId) ?? undefined
+					: null
 			await startUpdateNotesWorkflow({
 				body_md,
-				...(fallback_note_id ? { fallback_note_id } : {}),
+				...(picked ? { force_matched_note_id: picked } : {}),
 			})
 			if (isPwaStandalone()) {
 				window.location.reload()
@@ -132,50 +112,50 @@ export function HomeLayout({ children }: HomeLayoutProps) {
 
 	return (
 		<OpenUpdateNotesModalContext.Provider value={openUpdateNotesModal}>
-			<div className="relative mb-2 flex min-h-screen flex-col bg-gradient-to-br from-background via-primary/[0.04] to-chart-4/[0.12] dark:via-background dark:to-chart-2/20">
+			<div className="relative flex min-h-screen flex-col bg-background">
 				<div
-					className="pointer-events-none absolute inset-x-0 top-0 h-[28rem] bg-[radial-gradient(ellipse_80%_60%_at_50%_-10%,hsl(var(--primary)_/_0.18),transparent_65%)] dark:bg-[radial-gradient(ellipse_80%_55%_at_50%_-5%,hsl(var(--chart-4)_/_0.22),transparent_70%)]"
+					className="pointer-events-none absolute inset-x-0 top-0 h-48 bg-[radial-gradient(ellipse_70%_50%_at_50%_-20%,hsl(var(--primary)_/_0.1),transparent_70%)] dark:bg-[radial-gradient(ellipse_70%_45%_at_50%_-15%,hsl(var(--chart-4)_/_0.12),transparent_72%)]"
 					aria-hidden
 				/>
 				<header
-					className={`sticky top-0 z-50 flex h-16 items-center border-b ${borderColor} bg-background/75 px-6 backdrop-blur-md backdrop-saturate-150 dark:bg-background/65`}
+					className={`sticky top-0 z-50 flex h-10 items-center gap-2 border-b ${borderColor} bg-background/90 px-2 backdrop-blur-sm backdrop-saturate-150 sm:px-3 dark:bg-background/85`}
 				>
 					<Link
 						to="/"
 						className="flex shrink-0 items-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
 					>
-						<ProjectLogo />
+						<ProjectLogo className="text-sm" />
 					</Link>
 					<WorkflowTopBarIndicator />
-					<div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-3 md:gap-4">
-						<Button
-							type="button"
-							variant="updateNotes"
-							size="sm"
-							onClick={openUpdateNotesModal}
-						>
-							Update notes
-						</Button>
+					<div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-4 sm:gap-5">
 						<NextActionsHeaderLink />
 						<Link
 							to="/notes"
-							className="text-sm font-medium text-muted-foreground transition-colors hover:text-primary"
+							className="text-xs font-medium text-muted-foreground transition-colors hover:text-primary"
 						>
 							Notes
 						</Link>
 						<Link
 							to="/notes/updates"
-							className="text-sm font-medium text-muted-foreground transition-colors hover:text-primary"
+							className="text-xs font-medium text-muted-foreground transition-colors hover:text-primary"
 						>
 							Updates
 						</Link>
 						<SettingMenu />
 					</div>
 				</header>
-				<Breadcrumb />
-				<main className="relative z-0 mx-auto w-full max-w-7xl overflow-x-clip">
+				<main className="relative z-0 w-full min-w-0 overflow-x-clip">
 					{children}
 				</main>
+
+				<Button
+					type="button"
+					variant="updateNotes"
+					onClick={openUpdateNotesModal}
+					className="fixed bottom-[max(1rem,env(safe-area-inset-bottom,0px))] right-[max(1rem,env(safe-area-inset-right,0px))] z-40 h-14 min-w-[10.5rem] rounded-xl px-8 text-base font-semibold shadow-lg ring-1 ring-black/10 hover:brightness-110 hover:shadow-xl active:brightness-95 sm:h-16 sm:min-w-[12rem] sm:px-10 sm:text-lg dark:ring-white/10"
+				>
+					Update notes
+				</Button>
 
 				<Dialog
 					open={updateNotesOpen}
@@ -194,25 +174,27 @@ export function HomeLayout({ children }: HomeLayoutProps) {
 								<div className="space-y-2 text-sm text-muted-foreground">
 									<p>
 										Paste text to merge into your
-										best-matching note. A workflow picks the
-										note using summaries, then updates
-										sections with AI.
+										best-matching note. A workflow matches
+										using each note&apos;s title and
+										description, then updates sections with
+										AI.
 									</p>
-									{updateNotesAutoFallbackNoteId ? (
-										<p>
-											If matching is unclear, the merge
-											falls back to the note in your URL
-											or the last note you had open
-											(including when you open Updates
-											from a note).
-										</p>
-									) : (
-										<p>
-											If matching is unclear, you can
-											optionally pick a fallback note
-											below.
-										</p>
-									)}
+									<p>
+										With{" "}
+										<strong className="text-foreground">
+											Automatic
+										</strong>
+										, if no note is a clear match the update
+										stops on the{" "}
+										<Link
+											to="/notes/updates"
+											className="font-medium text-primary underline-offset-4 hover:underline"
+										>
+											Updates
+										</Link>{" "}
+										page so you can choose which note to
+										merge into.
+									</p>
 								</div>
 							</DialogDescription>
 						</DialogHeader>
@@ -222,10 +204,11 @@ export function HomeLayout({ children }: HomeLayoutProps) {
 									htmlFor="update-notes-target"
 									className="text-sm font-medium text-muted-foreground"
 								>
-									Target note when matching is unclear
+									Target note
 									<span className="font-normal text-muted-foreground">
 										{" "}
-										(optional)
+										(optional — pick a note to skip AI
+										matching)
 									</span>
 								</label>
 								<select
@@ -241,7 +224,7 @@ export function HomeLayout({ children }: HomeLayoutProps) {
 									className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
 								>
 									<option value="">
-										Automatic (URL or last-viewed note)
+										Automatic (match by title & description)
 									</option>
 									{updateNotesPickerRows.map((n) => (
 										<option key={n.id} value={n.id}>

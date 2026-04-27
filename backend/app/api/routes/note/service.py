@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Annotated, Any
 
 from fastapi import Depends, HTTPException
@@ -7,6 +7,13 @@ from fastapi import Depends, HTTPException
 from app.api.deps import CurrentUser
 from app.api.routes._shared.service import BaseService
 
+from .merge_undo import (
+    chunk_merge_boundaries,
+    note_merge_boundaries,
+    task_merge_boundaries,
+    verify_merge_undoable,
+)
+from .models import Chunk, NoteTask
 from .repository import (
     ChunkRepositoryDep,
     ExternalNoteUpdateRepositoryDep,
@@ -24,6 +31,7 @@ from .schemas import (
     NoteCreate,
     NoteCreateInternal,
     ExternalNoteUpdateOut,
+    ExternalNoteUpdatePatch,
     ExternalNoteUpdatesOut,
     ExternalNoteUpdatesPageOut,
     NextAction,
@@ -131,7 +139,7 @@ def _note_out(
     return NoteOut(
         id=note.id,
         title=note.title,
-        summary=note.summary,
+        description=note.description,
         archived=note.archived,
         full_markdown=join_chunks_markdown(chunks_sorted),
         chunks=[
@@ -235,7 +243,7 @@ class NoteService(BaseService):
     async def create(self, data: NoteCreate) -> NoteOut:
         internal = NoteCreateInternal(
             title=data.title,
-            summary=data.summary,
+            description=data.description,
             creator_id=self.current_user.id,
         )
         note = await self.repository.create(internal)
@@ -252,7 +260,7 @@ class NoteService(BaseService):
         await self.timeline.record_note_snapshot(
             note_id=note.id,
             title=note.title,
-            summary=note.summary,
+            description=note.description,
             archived=note.archived,
             editor_id=self.current_user.id,
         )
@@ -360,7 +368,7 @@ class NoteService(BaseService):
                 Notes(
                     id=n.id,
                     title=n.title,
-                    summary=n.summary,
+                    description=n.description,
                     archived=n.archived,
                     updated_ts=n.updated_ts,
                     created_ts=n.created_ts,
@@ -378,7 +386,7 @@ class NoteService(BaseService):
         await self.timeline.record_note_snapshot(
             note_id=note.id,
             title=note.title,
-            summary=note.summary,
+            description=note.description,
             archived=note.archived,
             editor_id=self.current_user.id,
         )
@@ -415,7 +423,7 @@ class NoteService(BaseService):
                         id=e["id"],
                         changed_ts=e["changed_ts"],
                         title=e["title"],
-                        summary=e["summary"],
+                        description=e["description"],
                         archived=e["archived"],
                         external_note_update_id=e["external_note_update_id"],
                     )
@@ -585,6 +593,272 @@ class NoteService(BaseService):
 
     async def delete_note(self, id: uuid.UUID) -> None:
         await self.repository.delete(id)
+
+    async def undo_merged_external_note_update(
+        self, update_id: uuid.UUID
+    ) -> ExternalNoteUpdateOut:
+        ext_row = await self.external_note_update_repository.read_by_id(update_id)
+        if ext_row.status != "merged" or ext_row.matched_note_id is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Only completed merges can be undone.",
+            )
+        note_id = ext_row.matched_note_id
+        note = await self.repository.read_by_id(note_id)
+        session = self.chunk_repository.session
+        ch_hist, n_hist, t_hist, merge_chunk_ids = await verify_merge_undoable(
+            session,
+            note_id=note_id,
+            ext_id=update_id,
+            note=note,
+        )
+        merge_task_ids = {
+            h.task_id for h in t_hist if h.external_note_update_id == update_id
+        }
+        editor_id = self.current_user.id
+
+        for chunk_id in merge_chunk_ids:
+            prior, outcome = chunk_merge_boundaries(ch_hist, chunk_id, update_id)
+            if prior is None and outcome is not None and not outcome.deleted:
+                try:
+                    ch = await self.chunk_repository.read_by_id(chunk_id)
+                except HTTPException:
+                    continue
+                await self.timeline.record_chunk_snapshot(
+                    note_id=note_id,
+                    chunk_id=ch.id,
+                    body_md=ch.body_md,
+                    sort_order=ch.sort_order,
+                    due_at=ch.due_at,
+                    completed=ch.completed,
+                    deleted=True,
+                    editor_id=editor_id,
+                    external_note_update_id=None,
+                )
+                await self.chunk_repository.delete(chunk_id)
+
+        for chunk_id in merge_chunk_ids:
+            prior, outcome = chunk_merge_boundaries(ch_hist, chunk_id, update_id)
+            if (
+                prior is not None
+                and not prior.deleted
+                and outcome is not None
+                and outcome.deleted
+            ):
+                existing = await session.get(Chunk, chunk_id)
+                if existing is None:
+                    restored = Chunk(
+                        id=chunk_id,
+                        note_id=note_id,
+                        body_md=prior.body_md,
+                        sort_order=prior.sort_order,
+                        due_at=prior.due_at,
+                        completed=prior.completed,
+                        created_ts=datetime.now(timezone.utc),
+                        updated_ts=datetime.now(timezone.utc),
+                    )
+                    session.add(restored)
+                    await session.commit()
+                    await self.timeline.record_chunk_snapshot(
+                        note_id=note_id,
+                        chunk_id=chunk_id,
+                        body_md=prior.body_md,
+                        sort_order=prior.sort_order,
+                        due_at=prior.due_at,
+                        completed=prior.completed,
+                        deleted=False,
+                        editor_id=editor_id,
+                        external_note_update_id=None,
+                    )
+
+        for chunk_id in merge_chunk_ids:
+            prior, outcome = chunk_merge_boundaries(ch_hist, chunk_id, update_id)
+            if (
+                prior is not None
+                and not prior.deleted
+                and outcome is not None
+                and not outcome.deleted
+            ):
+                existing = await session.get(Chunk, chunk_id)
+                if existing is not None:
+                    await self.chunk_repository.update(
+                        chunk_id,
+                        ChunkUpdate(
+                            body_md=prior.body_md,
+                            sort_order=prior.sort_order,
+                            due_at=prior.due_at,
+                            completed=prior.completed,
+                        ),
+                    )
+                    await self.timeline.record_chunk_snapshot(
+                        note_id=note_id,
+                        chunk_id=chunk_id,
+                        body_md=prior.body_md,
+                        sort_order=prior.sort_order,
+                        due_at=prior.due_at,
+                        completed=prior.completed,
+                        deleted=False,
+                        editor_id=editor_id,
+                        external_note_update_id=None,
+                    )
+
+        for task_id in merge_task_ids:
+            prior, outcome = task_merge_boundaries(t_hist, task_id, update_id)
+            if prior is None and outcome is not None and not outcome.deleted:
+                row = await session.get(NoteTask, task_id)
+                if row is None or row.note_id != note_id:
+                    continue
+                await self.timeline.record_task_snapshot(
+                    note_id=note_id,
+                    task_id=row.id,
+                    title=row.title,
+                    done=row.done,
+                    due_at=row.due_at,
+                    sort_order=row.sort_order,
+                    deleted=True,
+                    editor_id=editor_id,
+                    external_note_update_id=None,
+                )
+                await self.note_task_repository.delete(task_id)
+
+        for task_id in merge_task_ids:
+            prior, outcome = task_merge_boundaries(t_hist, task_id, update_id)
+            if (
+                prior is not None
+                and not prior.deleted
+                and outcome is not None
+                and outcome.deleted
+            ):
+                existing = await session.get(NoteTask, task_id)
+                if existing is None:
+                    restored = NoteTask(
+                        id=task_id,
+                        note_id=note_id,
+                        title=prior.title,
+                        done=prior.done,
+                        due_at=prior.due_at,
+                        sort_order=prior.sort_order,
+                        external_note_update_id=None,
+                        created_ts=datetime.now(timezone.utc),
+                        updated_ts=datetime.now(timezone.utc),
+                    )
+                    session.add(restored)
+                    await session.commit()
+                    await self.timeline.record_task_snapshot(
+                        note_id=note_id,
+                        task_id=task_id,
+                        title=prior.title,
+                        done=prior.done,
+                        due_at=prior.due_at,
+                        sort_order=prior.sort_order,
+                        deleted=False,
+                        editor_id=editor_id,
+                        external_note_update_id=None,
+                    )
+
+        for task_id in merge_task_ids:
+            prior, outcome = task_merge_boundaries(t_hist, task_id, update_id)
+            if (
+                prior is not None
+                and not prior.deleted
+                and outcome is not None
+                and not outcome.deleted
+            ):
+                row = await session.get(NoteTask, task_id)
+                if row is None or row.note_id != note_id:
+                    continue
+                row.title = prior.title
+                row.done = prior.done
+                row.due_at = prior.due_at
+                row.sort_order = prior.sort_order
+                if row.external_note_update_id == update_id:
+                    row.external_note_update_id = None
+                row.updated_ts = datetime.now(timezone.utc)
+                session.add(row)
+                await session.commit()
+                await self.timeline.record_task_snapshot(
+                    note_id=note_id,
+                    task_id=row.id,
+                    title=row.title,
+                    done=row.done,
+                    due_at=row.due_at,
+                    sort_order=row.sort_order,
+                    deleted=False,
+                    editor_id=editor_id,
+                    external_note_update_id=None,
+                )
+
+        n_prior, n_out = note_merge_boundaries(n_hist, update_id)
+        if n_out is not None and n_prior is not None:
+            await self.repository.update(
+                note_id,
+                NoteUpdate(
+                    title=n_prior.title,
+                    description=n_prior.description,
+                    archived=n_prior.archived,
+                ),
+            )
+            note_after = await self.repository.read_by_id(note_id)
+            await self.timeline.record_note_snapshot(
+                note_id=note_id,
+                title=note_after.title,
+                description=note_after.description,
+                archived=note_after.archived,
+                editor_id=editor_id,
+                external_note_update_id=None,
+            )
+
+        await self.external_note_update_repository.update(
+            update_id,
+            ExternalNoteUpdatePatch(status="undone"),
+        )
+        refreshed = await self.external_note_update_repository.read_by_id(update_id)
+        titles = await self.repository.read_titles_by_ids(
+            [nid] if (nid := refreshed.matched_note_id) else []
+        )
+        return _external_note_update_out(
+            refreshed,
+            matched_note_title=titles.get(refreshed.matched_note_id)
+            if refreshed.matched_note_id
+            else None,
+        )
+
+    async def _queue_external_update_merge_rerun(
+        self, update_id: uuid.UUID, target_note_id: uuid.UUID
+    ) -> None:
+        """Set matched note and status=pending (after merged→undone, awaiting_note, or undone)."""
+        tgt = await self.repository.read_by_id(target_note_id)
+        if tgt.archived:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot reapply into an archived note.",
+            )
+        await self.external_note_update_repository.update(
+            update_id,
+            ExternalNoteUpdatePatch(
+                matched_note_id=target_note_id,
+                status="pending",
+                error_message=None,
+            ),
+        )
+
+    async def prepare_sent_update_merge_rerun(
+        self, update_id: uuid.UUID, target_note_id: uuid.UUID
+    ) -> None:
+        ext_row = await self.external_note_update_repository.read_by_id(update_id)
+        if ext_row.status == "merged":
+            await self.undo_merged_external_note_update(update_id)
+        elif ext_row.status == "awaiting_note":
+            pass
+        elif ext_row.status != "undone":
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Only a merged update (to undo first), an update waiting for a "
+                    "note choice, or an undone update can be queued to merge into a note."
+                ),
+            )
+        await self._queue_external_update_merge_rerun(update_id, target_note_id)
 
 
 class ChunkService(BaseService):

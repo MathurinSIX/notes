@@ -31,8 +31,10 @@ async def update_notes_workflow(
 ) -> Any:
     """
     Store the update text, then run a background workflow: match the best note
-    (OpenAI + summaries), merge the text into that note's chunks (OpenAI), and
-    link resulting history rows to the stored update.
+    (OpenAI on title + description) unless `force_matched_note_id` is set, merge
+    the text into that note's chunks (OpenAI), and link resulting history rows to
+    the stored update. With no `fallback_note_id`, a non-match yields status
+    awaiting_note for the user to pick a note on the Updates page.
     """
     if not settings.OPENAI_API_KEY:
         raise HTTPException(

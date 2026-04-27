@@ -148,6 +148,7 @@ class ExternalNoteUpdateRepository(BaseRepository):
             select(ExternalNoteUpdate)
             .where(
                 ExternalNoteUpdate.matched_note_id == note_id,
+                ExternalNoteUpdate.status != "undone",
                 or_(
                     self.current_user.is_superuser,
                     self.rls_select(self.current_user.id),
@@ -166,6 +167,7 @@ class ExternalNoteUpdateRepository(BaseRepository):
             .where(
                 ExternalNoteUpdate.id == update_id,
                 ExternalNoteUpdate.matched_note_id == note_id,
+                ExternalNoteUpdate.status != "undone",
                 or_(
                     self.current_user.is_superuser,
                     self.rls_select(self.current_user.id),
@@ -507,7 +509,7 @@ class NoteTimelineRepository:
         *,
         note_id: uuid.UUID,
         title: str | None,
-        summary: str | None,
+        description: str | None,
         archived: bool,
         editor_id: uuid.UUID | None,
         changed_ts: datetime | None = None,
@@ -520,7 +522,7 @@ class NoteTimelineRepository:
             external_note_update_id=external_note_update_id,
             changed_ts=changed_ts or datetime.now(timezone.utc),
             title=title,
-            summary=summary,
+            description=description,
             archived=archived,
         )
         self.session.add(row)
@@ -601,7 +603,7 @@ class NoteTimelineRepository:
             cast(null(), PG_UUID(as_uuid=True)).label("chunk_id"),
             cast(null(), PG_UUID(as_uuid=True)).label("task_id"),
             NoteHistory.title,
-            NoteHistory.summary,
+            NoteHistory.description,
             NoteHistory.archived,
             cast(literal(""), Text).label("body_md"),
             cast(literal(0), Integer).label("sort_order"),
@@ -618,7 +620,7 @@ class NoteTimelineRepository:
             ChunkHistory.chunk_id,
             cast(null(), PG_UUID(as_uuid=True)).label("task_id"),
             cast(null(), Text).label("title"),
-            cast(null(), Text).label("summary"),
+            cast(null(), Text).label("description"),
             cast(false(), Boolean).label("archived"),
             ChunkHistory.body_md,
             ChunkHistory.sort_order,
@@ -635,7 +637,7 @@ class NoteTimelineRepository:
             cast(null(), PG_UUID(as_uuid=True)).label("chunk_id"),
             NoteTaskHistory.task_id,
             NoteTaskHistory.title,
-            cast(null(), Text).label("summary"),
+            cast(null(), Text).label("description"),
             cast(false(), Boolean).label("archived"),
             cast(literal(""), Text).label("body_md"),
             NoteTaskHistory.sort_order,
@@ -668,7 +670,7 @@ class NoteTimelineRepository:
                         "id": r["id"],
                         "changed_ts": r["changed_ts"],
                         "title": r["title"],
-                        "summary": r["summary"],
+                        "description": r["description"],
                         "archived": r["archived"],
                         "external_note_update_id": r["external_note_update_id"],
                     }

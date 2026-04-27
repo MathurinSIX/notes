@@ -45,7 +45,6 @@ import {
 	formatDueRelative,
 	isDueWithinTwentyFourHours,
 } from "@/lib/dueDate"
-import { rememberUpdateNotesFallbackNoteId } from "@/lib/updateNotesFallback"
 import {
 	chunkHistoryDiffText,
 	findPreviousChunkEvent,
@@ -98,6 +97,8 @@ function incomingUpdateStatusClass(status: string): string {
 			return "bg-rose-500/15 text-rose-950 dark:text-rose-50"
 		case "no_match":
 			return "bg-muted text-muted-foreground"
+		case "awaiting_note":
+			return "bg-sky-500/15 text-sky-950 dark:text-sky-100"
 		default:
 			return "bg-muted text-foreground"
 	}
@@ -192,7 +193,7 @@ function NoteDetailPage() {
 	const [loggedIn, setLoggedIn] = useState(false)
 	const [note, setNote] = useState<NoteOut | null>(null)
 	const [title, setTitle] = useState("")
-	const [summary, setSummary] = useState("")
+	const [description, setDescription] = useState("")
 	const [editingTitle, setEditingTitle] = useState(false)
 	const [editingChunkId, setEditingChunkId] = useState<string | null>(null)
 	const [loading, setLoading] = useState(true)
@@ -252,10 +253,6 @@ function NoteDetailPage() {
 		queryKey: ONGOING_WORKFLOW_RUNS_QUERY_KEY,
 		...ongoingWorkflowRunsQueryOptions(),
 	})
-
-	useEffect(() => {
-		rememberUpdateNotesFallbackNoteId(noteId)
-	}, [noteId])
 
 	useEffect(() => {
 		setEditingTaskId(null)
@@ -446,7 +443,7 @@ function NoteDetailPage() {
 			)
 			setNote(n)
 			setTitle(n.title ?? "")
-			setSummary(n.summary ?? "")
+			setDescription(n.description ?? "")
 			setHistoryLoaded(false)
 			setHistoryEvents([])
 			setHistorySkip(0)
@@ -511,7 +508,7 @@ function NoteDetailPage() {
 	const cancelTitleEdit = () => {
 		if (note) {
 			setTitle(note.title ?? "")
-			setSummary(note.summary ?? "")
+			setDescription(note.description ?? "")
 		}
 		setEditingTitle(false)
 	}
@@ -519,10 +516,10 @@ function NoteDetailPage() {
 	const saveTitle = async () => {
 		if (!note) return
 		try {
-			const trimmedSummary = summary.trim()
+			const trimmedDescription = description.trim()
 			const n = await updateNote(note.id, {
 				title: title || null,
-				summary: trimmedSummary ? trimmedSummary : null,
+				description: trimmedDescription ? trimmedDescription : null,
 			})
 			setNote(n)
 			setEditingTitle(false)
@@ -744,16 +741,16 @@ function NoteDetailPage() {
 
 	return (
 		<HomeLayout>
-			<div className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-6 pt-4 pb-10">
-				<nav className="flex items-center justify-between gap-3 text-sm">
+			<div className="flex w-full flex-col gap-3 px-3 pb-6 pt-2 sm:px-4">
+				<nav className="flex items-center justify-between gap-2 text-xs">
 					<Link
 						to="/notes"
-						className="inline-flex items-center gap-2 rounded-full border border-primary/25 bg-primary/[0.08] px-3.5 py-1.5 font-medium text-primary transition-colors hover:border-primary/40 hover:bg-primary/[0.14] dark:border-primary/35 dark:bg-primary/15 dark:hover:bg-primary/25"
+						className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/40 px-2 py-1 font-medium text-muted-foreground transition-colors hover:border-primary/30 hover:bg-muted/60 hover:text-foreground"
 					>
-						<span aria-hidden className="text-lg leading-none">
+						<span aria-hidden className="leading-none">
 							←
 						</span>
-						All notes
+						Notes
 					</Link>
 					<div className="flex shrink-0 flex-wrap justify-end gap-2">
 						<Button
@@ -1147,19 +1144,19 @@ function NoteDetailPage() {
 										className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-lg"
 									/>
 									<label
-										htmlFor="note-summary-edit"
+										htmlFor="note-description-edit"
 										className="text-sm font-medium text-muted-foreground"
 									>
-										Summary
+										Description
 									</label>
 									<textarea
-										id="note-summary-edit"
-										value={summary}
+										id="note-description-edit"
+										value={description}
 										onChange={(e) =>
-											setSummary(e.target.value)
+											setDescription(e.target.value)
 										}
 										rows={4}
-										placeholder="Short plain-text summary (optional)"
+										placeholder="Short plain-text description (optional)"
 										className="w-full resize-y rounded-lg border border-input bg-background px-3 py-2.5 text-sm leading-relaxed"
 									/>
 									<div className="flex flex-wrap gap-2">
@@ -1181,17 +1178,17 @@ function NoteDetailPage() {
 									</div>
 								</div>
 							) : (
-								<div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-									<div className="min-w-0 flex-1 space-y-1.5">
-										<h1 className="text-balance bg-gradient-to-r from-foreground via-foreground to-primary bg-clip-text text-3xl font-semibold leading-tight tracking-tight text-transparent md:text-4xl dark:to-chart-4">
+								<div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
+									<div className="min-w-0 flex-1 space-y-1">
+										<h1 className="line-clamp-2 text-balance text-lg font-semibold leading-snug tracking-tight text-foreground sm:text-xl">
 											{displayTitle}
 										</h1>
-										{note.summary?.trim() ? (
-											<p className="max-w-3xl text-pretty text-base leading-relaxed text-muted-foreground">
-												{note.summary.trim()}
+										{note.description?.trim() ? (
+											<p className="max-w-3xl text-pretty text-sm leading-relaxed text-muted-foreground">
+												{note.description.trim()}
 											</p>
 										) : null}
-										<p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
+										<p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
 											<span className="inline-flex items-center gap-1.5">
 												<span
 													className="h-1.5 w-1.5 shrink-0 rounded-full bg-sky-500 dark:bg-sky-400"
@@ -1230,8 +1227,8 @@ function NoteDetailPage() {
 												setEditingChunkId(null)
 												if (note) {
 													setTitle(note.title ?? "")
-													setSummary(
-														note.summary ?? "",
+													setDescription(
+														note.description ?? "",
 													)
 												}
 												setEditingTitle(true)
@@ -1869,12 +1866,12 @@ function NoteHistoryRow({
 	before: NoteHistoryEvent | null
 }) {
 	const prevTitle = before?.title ?? ""
-	const prevSummary = before?.summary ?? ""
+	const prevDescription = before?.description ?? ""
 	const prevArchived = before?.archived ?? false
 	const curTitle = event.title ?? ""
-	const curSummary = event.summary ?? ""
+	const curDescription = event.description ?? ""
 	const titleChanged = prevTitle !== curTitle
-	const summaryChanged = prevSummary !== curSummary
+	const descriptionChanged = prevDescription !== curDescription
 	const archivedChanged = prevArchived !== event.archived
 	const displayTitle = event.title?.trim() || "Untitled"
 	return (
@@ -1903,12 +1900,12 @@ function NoteHistoryRow({
 					<LineDiffBlock before={prevTitle} after={curTitle} />
 				</div>
 			) : null}
-			{summaryChanged ? (
+			{descriptionChanged ? (
 				<div className="space-y-1">
 					<p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-						Summary
+						Description
 					</p>
-					<LineDiffBlock before={prevSummary} after={curSummary} />
+					<LineDiffBlock before={prevDescription} after={curDescription} />
 				</div>
 			) : null}
 			{archivedChanged ? (
@@ -1922,7 +1919,7 @@ function NoteHistoryRow({
 					/>
 				</div>
 			) : null}
-			{!titleChanged && !summaryChanged && !archivedChanged ? (
+			{!titleChanged && !descriptionChanged && !archivedChanged ? (
 				<p className="text-xs text-muted-foreground">
 					No field changes in this row.
 				</p>

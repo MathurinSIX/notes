@@ -37,7 +37,7 @@ These captures are produced by Playwright (`npm run screenshots:readme` in `fron
 
 ![Notes list](docs/screenshots/notes.png)
 
-**Note detail** — title and summary, toolbar (History, Incoming updates, Add section), markdown sections, and archive/delete actions.
+**Note detail** — title and description, toolbar (History, Incoming updates, Add section), markdown sections, and archive/delete actions.
 
 ![Note detail](docs/screenshots/note-detail.png)
 
