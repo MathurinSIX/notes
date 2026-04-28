@@ -1,13 +1,15 @@
 import {
 	type ChunkHistoryEvent,
 	type ChunkOut,
+	type ExternalNoteUpdateOut,
 	type NoteHistoryEvent,
 	type NoteOut,
-	type TaskHistoryEvent,
 	type NoteTaskOut,
+	type TaskHistoryEvent,
 	createChunk,
 	deleteChunk,
 	deleteNote,
+	deleteNoteTask,
 	getChunkHistory,
 	getNote,
 	getNoteHistory,
@@ -15,20 +17,15 @@ import {
 	patchNoteTask,
 	updateChunk,
 	updateNote,
-	type ExternalNoteUpdateOut,
 } from "@/api/notes"
 import { ApiError } from "@/client"
+import { FollowUpSourceModal } from "@/components/FollowUpSourceModal"
+import { FollowUpSourceButton } from "@/components/IncomingUpdateSourceHint"
+import { TaskDuePostponeDropdown } from "@/components/TaskDuePostponeDropdown"
 import { LineDiffBlock } from "@/components/diff/LineDiffBlock"
 import { MarkdownEditor } from "@/components/editor/MarkdownEditor"
 import { MarkdownPreview } from "@/components/editor/MarkdownPreview"
-import { FollowUpSourceModal } from "@/components/FollowUpSourceModal"
-import { FollowUpSourceButton } from "@/components/IncomingUpdateSourceHint"
 import { HomeLayout } from "@/components/layouts/HomeLayout"
-import { TaskDuePostponeDropdown } from "@/components/TaskDuePostponeDropdown"
-import {
-	ONGOING_WORKFLOW_RUNS_QUERY_KEY,
-	ongoingWorkflowRunsQueryOptions,
-} from "@/lib/ongoingWorkflowRunsQuery"
 import { Button } from "@/components/ui/button"
 import {
 	Dialog,
@@ -50,10 +47,47 @@ import {
 	findPreviousNoteEvent,
 	findPreviousTaskEvent,
 } from "@/lib/noteHistoryDiff"
-import { Link, createFileRoute, useNavigate } from "@tanstack/react-router"
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react"
-import { LuArchive, LuPencil, LuPlus, LuTrash2 } from "react-icons/lu"
+import {
+	ONGOING_WORKFLOW_RUNS_QUERY_KEY,
+	ongoingWorkflowRunsQueryOptions,
+} from "@/lib/ongoingWorkflowRunsQuery"
+import { cn } from "@/lib/utils"
+import {
+	DndContext,
+	type DragEndEvent,
+	KeyboardSensor,
+	PointerSensor,
+	closestCenter,
+	useSensor,
+	useSensors,
+} from "@dnd-kit/core"
+import {
+	SortableContext,
+	arrayMove,
+	sortableKeyboardCoordinates,
+	useSortable,
+	verticalListSortingStrategy,
+} from "@dnd-kit/sortable"
+import { CSS } from "@dnd-kit/utilities"
 import { useQuery } from "@tanstack/react-query"
+import { Link, createFileRoute, useNavigate } from "@tanstack/react-router"
+import {
+	Fragment,
+	type ReactNode,
+	useCallback,
+	useEffect,
+	useMemo,
+	useState,
+} from "react"
+import {
+	LuArchive,
+	LuChevronDown,
+	LuChevronUp,
+	LuGripVertical,
+	LuPencil,
+	LuPlus,
+	LuTrash2,
+} from "react-icons/lu"
 
 /** Avoid opening the incoming-updates modal twice (e.g. React Strict Mode). */
 const consumedIncomingDeepLinks = new Set<string>()
@@ -106,6 +140,8 @@ function incomingUpdateStatusClass(status: string): string {
 
 const HISTORY_PAGE_SIZE = 5
 const TASK_PAGE_SIZE = 8
+/** How many due-date groups to show per page on the active follow-ups list. */
+const OPEN_DUE_GROUPS_PAGE_SIZE = 3
 
 function clampTaskSkip(skip: number, total: number, pageSize: number): number {
 	if (total === 0) return 0
@@ -113,17 +149,123 @@ function clampTaskSkip(skip: number, total: number, pageSize: number): number {
 	return Math.min(skip, maxSkip)
 }
 
-function partitionNoteTasks(tasks: NoteTaskOut[] | undefined) {
+function dueAtRank(d: string | null | undefined): number {
+	if (d == null || d === "") return Number.POSITIVE_INFINITY
+	const ms = new Date(d).getTime()
+	return Number.isNaN(ms) ? Number.POSITIVE_INFINITY : ms
+}
+
+function dueBucketKey(t: NoteTaskOut): string {
+	return t.due_at != null && t.due_at !== "" ? t.due_at : "__no_due__"
+}
+
+function compareTasksByDueThenOrder(
+	a: NoteTaskOut,
+	b: NoteTaskOut,
+): number {
+	const da = dueAtRank(a.due_at) - dueAtRank(b.due_at)
+	if (da !== 0) return da
+	const so = a.sort_order - b.sort_order
+	if (so !== 0) return so
+	return a.created_ts.localeCompare(b.created_ts)
+}
+
+function sortNoteTasks(tasks: NoteTaskOut[] | undefined): NoteTaskOut[] {
 	const raw = tasks ?? []
-	const sorted = [...raw].sort(
-		(a, b) =>
-			a.sort_order - b.sort_order ||
-			a.created_ts.localeCompare(b.created_ts),
-	)
+	return [...raw].sort(compareTasksByDueThenOrder)
+}
+
+function groupOpenFollowUpsByDue(
+	openSorted: NoteTaskOut[],
+): { key: string; tasks: NoteTaskOut[] }[] {
+	const groups: { key: string; tasks: NoteTaskOut[] }[] = []
+	for (const t of openSorted) {
+		const key = dueBucketKey(t)
+		const last = groups[groups.length - 1]
+		if (last && last.key === key) {
+			last.tasks.push(t)
+		} else {
+			groups.push({ key, tasks: [t] })
+		}
+	}
+	return groups
+}
+
+function buildNewOpenIdsAfterBucketReorder(
+	openSorted: NoteTaskOut[],
+	bucketKey: string,
+	bucketIdsOrdered: string[],
+): string[] {
+	const groups = groupOpenFollowUpsByDue(openSorted)
+	const out: string[] = []
+	for (const g of groups) {
+		if (g.key === bucketKey) {
+			out.push(...bucketIdsOrdered)
+		} else {
+			out.push(...g.tasks.map((x) => x.id))
+		}
+	}
+	return out
+}
+
+function partitionNoteTasks(tasks: NoteTaskOut[] | undefined) {
+	const sorted = sortNoteTasks(tasks)
 	return {
 		openFollowUps: sorted.filter((t) => !t.done),
 		doneFollowUps: sorted.filter((t) => t.done),
 	}
+}
+
+/** Preserves done-task positions; replaces the open-task subsequence with `newOpenIdsOrdered`. */
+function reorderOpenTasksInGlobalList(
+	allSorted: NoteTaskOut[],
+	newOpenIdsOrdered: string[],
+): NoteTaskOut[] {
+	const byId = new Map(allSorted.map((t) => [t.id, t]))
+	let oi = 0
+	return allSorted.map((t) => {
+		if (t.done) return t
+		const nid = newOpenIdsOrdered[oi++]
+		const next = byId.get(nid)
+		if (!next) return t
+		return next
+	})
+}
+
+function SortableOpenFollowUpRow({
+	id,
+	sortDisabled,
+	children,
+}: {
+	id: string
+	sortDisabled?: boolean
+	children: (dragHandleProps: Record<string, unknown>) => ReactNode
+}) {
+	const {
+		attributes,
+		listeners,
+		setNodeRef,
+		transform,
+		transition,
+		isDragging,
+	} = useSortable({ id, disabled: !!sortDisabled })
+	const style = {
+		transform: CSS.Transform.toString(transform),
+		transition,
+	}
+	const dragHandleProps = { ...attributes, ...listeners } as Record<
+		string,
+		unknown
+	>
+	return (
+		<li
+			ref={setNodeRef}
+			style={style}
+			className={cn(isDragging && "relative z-[1] opacity-70")}
+		>
+			{children(dragHandleProps)}
+		</li>
+	)
 }
 
 function sortNoteChunks(chunks: ChunkOut[]): ChunkOut[] {
@@ -230,8 +372,7 @@ function NoteDetailPage() {
 	const [sectionHistorySkip, setSectionHistorySkip] = useState(0)
 	const [sectionHistoryTotal, setSectionHistoryTotal] = useState(0)
 	const [incomingUpdatesOpen, setIncomingUpdatesOpen] = useState(false)
-	const [incomingUpdatesLoading, setIncomingUpdatesLoading] =
-		useState(false)
+	const [incomingUpdatesLoading, setIncomingUpdatesLoading] = useState(false)
 	const [incomingUpdatesError, setIncomingUpdatesError] = useState<
 		string | null
 	>(null)
@@ -247,12 +388,14 @@ function NoteDetailPage() {
 	const [followUpSourceId, setFollowUpSourceId] = useState<string | null>(
 		null,
 	)
-	const [taskOpenSkip, setTaskOpenSkip] = useState(0)
+	const [taskOpenGroupSkip, setTaskOpenGroupSkip] = useState(0)
 	const [taskDoneSkip, setTaskDoneSkip] = useState(0)
 	const [taskListView, setTaskListView] = useState<"active" | "done">(
 		"active",
 	)
 	const [editingTaskId, setEditingTaskId] = useState<string | null>(null)
+	const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null)
+	const [taskReorderBusy, setTaskReorderBusy] = useState(false)
 	const [taskEditTitle, setTaskEditTitle] = useState("")
 	const [taskEditDueLocal, setTaskEditDueLocal] = useState("")
 	const [hadOngoingWorkflows, setHadOngoingWorkflows] = useState(false)
@@ -264,6 +407,7 @@ function NoteDetailPage() {
 
 	useEffect(() => {
 		setEditingTaskId(null)
+		setDeletingTaskId(null)
 	}, [noteId])
 
 	useEffect(() => {
@@ -351,20 +495,20 @@ function NoteDetailPage() {
 					chunkId
 						? {
 								chunkId,
-							}
+						  }
 						: undefined,
 				)
 				setIncomingUpdatesList(r.data)
 			} catch (e) {
 				let msg = "Failed to load incoming updates"
-			if (
-				e instanceof ApiError &&
-				e.body &&
-				typeof e.body === "object"
-			) {
-				const d = e.body as { detail?: unknown }
-				if (d.detail) msg = String(d.detail)
-			} else if (e instanceof Error) msg = e.message
+				if (
+					e instanceof ApiError &&
+					e.body &&
+					typeof e.body === "object"
+				) {
+					const d = e.body as { detail?: unknown }
+					if (d.detail) msg = String(d.detail)
+				} else if (e instanceof Error) msg = e.message
 				setIncomingUpdatesError(msg)
 			} finally {
 				setIncomingUpdatesLoading(false)
@@ -491,7 +635,7 @@ function NoteDetailPage() {
 	}, [ongoingRunsData?.count, hadOngoingWorkflows, mounted, loggedIn, load])
 
 	useEffect(() => {
-		setTaskOpenSkip(0)
+		setTaskOpenGroupSkip(0)
 		setTaskDoneSkip(0)
 		setTaskListView("active")
 	}, [noteId])
@@ -576,11 +720,7 @@ function NoteDetailPage() {
 			navigate({ to: "/notes" })
 		} catch (e) {
 			let msg = "Could not delete note"
-			if (
-				e instanceof ApiError &&
-				e.body &&
-				typeof e.body === "object"
-			) {
+			if (e instanceof ApiError && e.body && typeof e.body === "object") {
 				const d = e.body as { detail?: unknown }
 				if (d.detail) msg = String(d.detail)
 			} else if (e instanceof Error) msg = e.message
@@ -596,15 +736,34 @@ function NoteDetailPage() {
 			setNote(n)
 		} catch (e) {
 			let msg = "Could not update task"
-			if (
-				e instanceof ApiError &&
-				e.body &&
-				typeof e.body === "object"
-			) {
+			if (e instanceof ApiError && e.body && typeof e.body === "object") {
 				const d = e.body as { detail?: unknown }
 				if (d.detail) msg = String(d.detail)
 			} else if (e instanceof Error) msg = e.message
 			setError(msg)
+		}
+	}
+
+	const handleDeleteFollowUpTask = async (t: NoteTaskOut) => {
+		if (!note) return
+		if (!window.confirm("Delete this follow-up? This cannot be undone.")) {
+			return
+		}
+		setDeletingTaskId(t.id)
+		setError(null)
+		try {
+			await deleteNoteTask(note.id, t.id)
+			setEditingTaskId((id) => (id === t.id ? null : id))
+			await load()
+		} catch (e) {
+			let msg = "Could not delete follow-up"
+			if (e instanceof ApiError && e.body && typeof e.body === "object") {
+				const d = e.body as { detail?: unknown }
+				if (d.detail) msg = String(d.detail)
+			} else if (e instanceof Error) msg = e.message
+			setError(msg)
+		} finally {
+			setDeletingTaskId((id) => (id === t.id ? null : id))
 		}
 	}
 
@@ -730,11 +889,115 @@ function NoteDetailPage() {
 		[note],
 	)
 
+	const openDueGroups = useMemo(
+		() => groupOpenFollowUpsByDue(openFollowUps),
+		[openFollowUps],
+	)
+
+	const sensors = useSensors(
+		useSensor(PointerSensor, {
+			activationConstraint: { distance: 8 },
+		}),
+		useSensor(KeyboardSensor, {
+			coordinateGetter: sortableKeyboardCoordinates,
+		}),
+	)
+
+	const commitOpenTaskOrder = useCallback(
+		async (newOpenIdsOrdered: string[]) => {
+			if (!note) return
+			const allSorted = sortNoteTasks(note.tasks)
+			const reordered = reorderOpenTasksInGlobalList(
+				allSorted,
+				newOpenIdsOrdered,
+			)
+			const patches = reordered
+				.map((t, i) => ({ id: t.id, sort_order: i }))
+				.filter(({ id, sort_order }) => {
+					const orig = allSorted.find((x) => x.id === id)
+					return orig != null && orig.sort_order !== sort_order
+				})
+			if (patches.length === 0) return
+			setTaskReorderBusy(true)
+			setError(null)
+			try {
+				await Promise.all(
+					patches.map((p) =>
+						patchNoteTask(note.id, p.id, {
+							sort_order: p.sort_order,
+						}),
+					),
+				)
+				await load()
+			} catch (e) {
+				let msg = "Could not reorder follow-ups"
+				if (
+					e instanceof ApiError &&
+					e.body &&
+					typeof e.body === "object"
+				) {
+					const d = e.body as { detail?: unknown }
+					if (d.detail) msg = String(d.detail)
+				} else if (e instanceof Error) msg = e.message
+				setError(msg)
+			} finally {
+				setTaskReorderBusy(false)
+			}
+		},
+		[note, load],
+	)
+
+	const makeDueBucketDragEndHandler = useCallback(
+		(bucketKey: string, bucketIds: string[]) => {
+			return async (event: DragEndEvent) => {
+				const { active, over } = event
+				if (!note || !over || active.id === over.id) return
+				const oldIndex = bucketIds.indexOf(String(active.id))
+				const newIndex = bucketIds.indexOf(String(over.id))
+				if (oldIndex < 0 || newIndex < 0) return
+				const nextBucket = arrayMove(bucketIds, oldIndex, newIndex)
+				const newOpenIds = buildNewOpenIdsAfterBucketReorder(
+					openFollowUps,
+					bucketKey,
+					nextBucket,
+				)
+				await commitOpenTaskOrder(newOpenIds)
+			}
+		},
+		[note, openFollowUps, commitOpenTaskOrder],
+	)
+
+	const nudgeOpenTaskInDueBucket = useCallback(
+		async (t: NoteTaskOut, delta: -1 | 1) => {
+			if (!note) return
+			const bucketKey = dueBucketKey(t)
+			const bucket = openFollowUps.filter(
+				(x) => dueBucketKey(x) === bucketKey,
+			)
+			const idx = bucket.findIndex((x) => x.id === t.id)
+			const j = idx + delta
+			if (idx < 0 || j < 0 || j >= bucket.length) return
+			const ids = bucket.map((x) => x.id)
+			const nextBucket = arrayMove(ids, idx, j)
+			const newOpenIds = buildNewOpenIdsAfterBucketReorder(
+				openFollowUps,
+				bucketKey,
+				nextBucket,
+			)
+			await commitOpenTaskOrder(newOpenIds)
+		},
+		[note, openFollowUps, commitOpenTaskOrder],
+	)
+
 	useEffect(() => {
-		setTaskOpenSkip((s) =>
-			clampTaskSkip(s, openFollowUps.length, TASK_PAGE_SIZE),
+		setTaskOpenGroupSkip((s) =>
+			clampTaskSkip(
+				s,
+				openDueGroups.length,
+				OPEN_DUE_GROUPS_PAGE_SIZE,
+			),
 		)
-	}, [openFollowUps.length])
+	}, [openDueGroups.length])
 
 	useEffect(() => {
 		setTaskDoneSkip((s) =>
@@ -750,19 +1013,20 @@ function NoteDetailPage() {
 
 	if (!mounted || !authChecked || !loggedIn) return null
 
-	const openTaskSkipEff = clampTaskSkip(
-		taskOpenSkip,
-		openFollowUps.length,
-		TASK_PAGE_SIZE,
+	const openDueGroupSkipEff = clampTaskSkip(
+		taskOpenGroupSkip,
+		openDueGroups.length,
+		OPEN_DUE_GROUPS_PAGE_SIZE,
 	)
+	const visibleOpenDueGroups = openDueGroups.slice(
+		openDueGroupSkipEff,
+		openDueGroupSkipEff + OPEN_DUE_GROUPS_PAGE_SIZE,
+	)
+
 	const doneTaskSkipEff = clampTaskSkip(
 		taskDoneSkip,
 		doneFollowUps.length,
 		TASK_PAGE_SIZE,
-	)
-	const openTasksPage = openFollowUps.slice(
-		openTaskSkipEff,
-		openTaskSkipEff + TASK_PAGE_SIZE,
 	)
 	const doneTasksPage = doneFollowUps.slice(
 		doneTaskSkipEff,
@@ -821,8 +1085,8 @@ function NoteDetailPage() {
 								<DialogDescription>
 									Newest first. Each row compares to the prior
 									snapshot of the same kind (note metadata or
-									section body)—additions in green, removals in
-									red, like Git.
+									section body)—additions in green, removals
+									in red, like Git.
 								</DialogDescription>
 							</DialogHeader>
 						</div>
@@ -975,10 +1239,14 @@ function NoteDetailPage() {
 										>
 											<div className="mb-3 flex flex-wrap items-center justify-between gap-2">
 												<p className="text-xs text-muted-foreground">
-													{formatUpdated(u.created_ts)}
+													{formatUpdated(
+														u.created_ts,
+													)}
 												</p>
 												<span
-													className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${incomingUpdateStatusClass(u.status)}`}
+													className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${incomingUpdateStatusClass(
+														u.status,
+													)}`}
 												>
 													{u.status}
 												</span>
@@ -1037,9 +1305,9 @@ function NoteDetailPage() {
 							<DialogHeader className="space-y-2 text-left">
 								<DialogTitle>Section history</DialogTitle>
 								<DialogDescription>
-									Newest first. Body text is diffed against the
-									previous snapshot for this section (green /
-									red).
+									Newest first. Body text is diffed against
+									the previous snapshot for this section
+									(green / red).
 								</DialogDescription>
 							</DialogHeader>
 						</div>
@@ -1287,7 +1555,9 @@ function NoteDetailPage() {
 											className="h-7 w-7 shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
 											aria-label="Delete note"
 											title="Delete note"
-											onClick={() => void handleDeleteNote()}
+											onClick={() =>
+												void handleDeleteNote()
+											}
 										>
 											<LuTrash2 className="h-3.5 w-3.5" />
 										</Button>
@@ -1306,6 +1576,13 @@ function NoteDetailPage() {
 										<h2 className="text-sm font-semibold tracking-wide text-teal-900 dark:text-teal-100">
 											Follow-up tasks
 										</h2>
+										<p className="mt-0.5 text-xs text-muted-foreground">
+											Sorted by due date, then manual order
+											within the same due. Drag the grip or
+											use arrows to reorder; arrows work
+											across pages. Only the checkbox marks
+											done.
+										</p>
 									</div>
 									{doneFollowUps.length > 0 ? (
 										<Button
@@ -1313,10 +1590,14 @@ function NoteDetailPage() {
 											variant="outline"
 											size="sm"
 											className="shrink-0 self-end sm:mt-0.5 sm:self-start"
-											aria-pressed={taskListView === "done"}
+											aria-pressed={
+												taskListView === "done"
+											}
 											onClick={() =>
 												setTaskListView((v) =>
-													v === "active" ? "done" : "active",
+													v === "active"
+														? "done"
+														: "active",
 												)
 											}
 										>
@@ -1329,181 +1610,443 @@ function NoteDetailPage() {
 
 								{taskListView === "active" ? (
 									openFollowUps.length > 0 ? (
-										<div className="space-y-2">
-											<ul className="space-y-2">
-												{openTasksPage.map((t) => {
-													const isEditing = editingTaskId === t.id
-													return (
-														<li key={t.id}>
-															<div className="flex flex-col gap-2 rounded-md border border-transparent px-1 py-1 hover:border-border">
-																<div
-																	className={`flex justify-between gap-2 ${isEditing ? "items-start" : "items-center"}`}
-																>
-																	{isEditing ? (
-																		<div className="min-w-0 flex-1 space-y-2">
-																			<textarea
-																				value={taskEditTitle}
-																				onChange={(e) =>
-																					setTaskEditTitle(
-																						e.target.value,
-																					)
-																				}
-																				rows={3}
-																				className="w-full resize-y rounded-md border border-input bg-background px-2 py-1.5 text-sm text-foreground shadow-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
-																			/>
-																			<div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end">
-																				<label className="flex min-w-0 flex-1 flex-col gap-1 text-xs text-muted-foreground">
-																					<span>
-																						Due (optional)
-																					</span>
-																					<input
-																						type="datetime-local"
-																						value={
-																							taskEditDueLocal
-																						}
-																						onChange={(e) =>
-																							setTaskEditDueLocal(
-																								e.target
-																									.value,
-																							)
-																						}
-																						className="w-full min-w-0 rounded-md border border-input bg-background px-2 py-1.5 text-sm text-foreground shadow-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring sm:max-w-xs"
-																					/>
-																				</label>
-																				<Button
-																					type="button"
-																					variant="outline"
-																					size="sm"
-																					className="w-fit shrink-0"
-																					onClick={() =>
-																						setTaskEditDueLocal(
-																							"",
-																						)
+										<div className="space-y-3">
+											{visibleOpenDueGroups.map((group) => {
+												const bucketIds = group.tasks.map(
+													(x) => x.id,
+												)
+												const dueHeading =
+													group.key === "__no_due__"
+														? "No due date"
+														: formatDueRelative(
+																group.tasks[0]
+																	?.due_at ??
+																	null,
+															)
+												return (
+													<div
+														key={group.key}
+														className="rounded-lg border border-teal-300/50 bg-muted/25 p-2.5 dark:border-teal-800/45 dark:bg-muted/15"
+													>
+														<p className="mb-2 text-xs font-medium text-teal-900 dark:text-teal-100">
+															{dueHeading}
+															{" "}
+															<span className="font-normal text-muted-foreground">
+																({group.tasks.length})
+															</span>
+														</p>
+														<DndContext
+															sensors={sensors}
+															collisionDetection={
+																closestCenter
+															}
+															onDragEnd={(e) =>
+																void makeDueBucketDragEndHandler(
+																	group.key,
+																	bucketIds,
+																)(e)
+															}
+														>
+															<SortableContext
+																items={bucketIds}
+																strategy={
+																	verticalListSortingStrategy
+																}
+															>
+																<ul className="max-h-[min(52vh,26rem)] space-y-2 overflow-y-auto pr-0.5">
+																	{group.tasks.map(
+																		(t) => {
+																			const isEditing =
+																				editingTaskId ===
+																				t.id
+																			const taskBusy =
+																				deletingTaskId ===
+																				t.id
+																			const bucketIdx =
+																				group.tasks.findIndex(
+																					(x) =>
+																						x.id ===
+																						t.id,
+																				)
+																			const sortDisabled =
+																				!!editingTaskId ||
+																				taskReorderBusy ||
+																				deletingTaskId !=
+																					null
+																			return (
+																				<SortableOpenFollowUpRow
+																					key={
+																						t.id
+																					}
+																					id={
+																						t.id
+																					}
+																					sortDisabled={
+																						sortDisabled
 																					}
 																				>
-																					Clear due
-																				</Button>
-																			</div>
-																			<div className="flex flex-wrap gap-2">
-																				<Button
-																					type="button"
-																					size="sm"
-																					onClick={() =>
-																						void saveEditingTask(
-																							t,
-																						)
-																					}
-																				>
-																					Save
-																				</Button>
-																				<Button
-																					type="button"
-																					variant="outline"
-																					size="sm"
-																					onClick={
-																						cancelEditingTask
-																					}
-																				>
-																					Cancel
-																				</Button>
-																			</div>
-																		</div>
-																	) : (
-																		<div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
-																			<input
-																				id={`task-open-${t.id}`}
-																				type="checkbox"
-																				className="h-4 w-4 shrink-0 rounded border-input"
-																				checked={t.done}
-																				onChange={() =>
-																					void toggleNoteTask(t)
-																				}
-																			/>
-																			<label
-																				htmlFor={`task-open-${t.id}`}
-																				className="min-w-0 flex-1 cursor-pointer text-sm leading-relaxed text-foreground"
-																			>
-																				{t.title}
-																			</label>
-																			{note ? (
-																				<TaskDuePostponeDropdown
-																					noteId={note.id}
-																					taskId={t.id}
-																					dueAt={t.due_at}
-																					density="compact"
-																					variant="open"
-																					onError={(msg) =>
-																						setError(msg)
-																					}
-																					onPatched={(n) => setNote(n)}
-																				/>
-																			) : null}
-																		</div>
+																					{(
+																						dragHandleProps,
+																					) => (
+																						<div
+																							className={cn(
+																								"flex flex-col gap-2 rounded-md border border-transparent px-1 py-1 hover:border-border",
+																								taskBusy &&
+																									"pointer-events-none opacity-60",
+																							)}
+																						>
+																							<div
+																								className={`flex justify-between gap-2 ${
+																									isEditing
+																										? "items-start"
+																										: "items-center"
+																								}`}
+																							>
+																								{isEditing ? (
+																									<div className="min-w-0 flex-1 space-y-2">
+																										<textarea
+																											value={
+																												taskEditTitle
+																											}
+																											onChange={(
+																												e,
+																											) =>
+																												setTaskEditTitle(
+																													e
+																														.target
+																														.value,
+																												)
+																											}
+																											rows={
+																												3
+																											}
+																											disabled={
+																												taskBusy
+																											}
+																											className="w-full resize-y rounded-md border border-input bg-background px-2 py-1.5 text-sm text-foreground shadow-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
+																										/>
+																										<div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end">
+																											<label className="flex min-w-0 flex-1 flex-col gap-1 text-xs text-muted-foreground">
+																												<span>
+																													Due
+																													(optional)
+																												</span>
+																												<input
+																													type="datetime-local"
+																													value={
+																														taskEditDueLocal
+																													}
+																													onChange={(
+																														e,
+																													) =>
+																														setTaskEditDueLocal(
+																															e
+																																.target
+																																.value,
+																														)
+																													}
+																													disabled={
+																														taskBusy
+																													}
+																													className="w-full min-w-0 rounded-md border border-input bg-background px-2 py-1.5 text-sm text-foreground shadow-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring sm:max-w-xs"
+																												/>
+																											</label>
+																											<Button
+																												type="button"
+																												variant="outline"
+																												size="sm"
+																												className="w-fit shrink-0"
+																												disabled={
+																													taskBusy
+																												}
+																												onClick={() =>
+																													setTaskEditDueLocal(
+																														"",
+																													)
+																												}
+																											>
+																												Clear
+																												due
+																											</Button>
+																										</div>
+																										<div className="flex flex-wrap gap-2">
+																											<Button
+																												type="button"
+																												size="sm"
+																												disabled={
+																													taskBusy
+																												}
+																												onClick={() =>
+																													void saveEditingTask(
+																														t,
+																													)
+																												}
+																											>
+																												Save
+																											</Button>
+																											<Button
+																												type="button"
+																												variant="outline"
+																												size="sm"
+																												disabled={
+																													taskBusy
+																												}
+																												onClick={
+																													cancelEditingTask
+																												}
+																											>
+																												Cancel
+																											</Button>
+																											<Button
+																												type="button"
+																												variant="destructive"
+																												size="sm"
+																												disabled={
+																													taskBusy
+																												}
+																												onClick={() =>
+																													void handleDeleteFollowUpTask(
+																														t,
+																													)
+																												}
+																											>
+																												Delete
+																											</Button>
+																										</div>
+																									</div>
+																								) : (
+																									<div className="flex min-w-0 flex-1 flex-wrap items-center gap-1 sm:gap-1.5">
+																										<button
+																											type="button"
+																											className="mt-0.5 flex h-7 w-6 shrink-0 touch-none items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-30 sm:mt-0"
+																											aria-label="Drag to reorder"
+																											disabled={
+																												sortDisabled ||
+																												taskBusy
+																											}
+																											{...(sortDisabled ||
+																											taskBusy
+																												? {}
+																												: dragHandleProps)}
+																										>
+																											<LuGripVertical className="h-3.5 w-3.5" />
+																										</button>
+																										{group.tasks
+																											.length >
+																										1 ? (
+																											<>
+																												<Button
+																													type="button"
+																													variant="ghost"
+																													size="icon"
+																													className="h-7 w-7 shrink-0 text-muted-foreground"
+																													aria-label="Move earlier for this due date"
+																													title="Move earlier (same due)"
+																													disabled={
+																														sortDisabled ||
+																														taskBusy ||
+																														bucketIdx <=
+																															0
+																													}
+																													onClick={() =>
+																														void nudgeOpenTaskInDueBucket(
+																															t,
+																															-1,
+																														)
+																													}
+																												>
+																													<LuChevronUp className="h-3.5 w-3.5" />
+																												</Button>
+																												<Button
+																													type="button"
+																													variant="ghost"
+																													size="icon"
+																													className="h-7 w-7 shrink-0 text-muted-foreground"
+																													aria-label="Move later for this due date"
+																													title="Move later (same due)"
+																													disabled={
+																														sortDisabled ||
+																														taskBusy ||
+																														bucketIdx >=
+																															group
+																																.tasks
+																																.length -
+																																1
+																													}
+																													onClick={() =>
+																														void nudgeOpenTaskInDueBucket(
+																															t,
+																															1,
+																														)
+																													}
+																												>
+																													<LuChevronDown className="h-3.5 w-3.5" />
+																												</Button>
+																											</>
+																										) : null}
+																										<input
+																											id={`task-open-${t.id}`}
+																											type="checkbox"
+																											className="h-4 w-4 shrink-0 rounded border-input"
+																											checked={
+																												t.done
+																											}
+																											disabled={
+																												taskBusy
+																											}
+																											aria-label={`Mark done: ${t.title}`}
+																											onChange={() =>
+																												void toggleNoteTask(
+																													t,
+																												)
+																											}
+																										/>
+																										<span className="min-w-0 flex-1 text-sm leading-relaxed text-foreground">
+																											{t.title}
+																										</span>
+																										{note ? (
+																											<TaskDuePostponeDropdown
+																												noteId={
+																													note.id
+																												}
+																												taskId={
+																													t.id
+																												}
+																												dueAt={
+																													t.due_at
+																												}
+																												density="compact"
+																												variant="open"
+																												disabled={
+																													taskBusy
+																												}
+																												onError={(
+																													msg,
+																												) =>
+																													setError(
+																														msg,
+																													)
+																												}
+																												onPatched={(
+																													n,
+																												) =>
+																													setNote(
+																														n,
+																													)
+																												}
+																											/>
+																										) : null}
+																									</div>
+																								)}
+																								{note ? (
+																									<div className="flex shrink-0 flex-col items-end justify-center gap-1 sm:flex-row sm:items-center">
+																										{!isEditing ? (
+																											<>
+																												<Button
+																													type="button"
+																													variant="ghost"
+																													size="sm"
+																													className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
+																													disabled={
+																														taskBusy
+																													}
+																													onClick={() =>
+																														startEditingTask(
+																															t,
+																														)
+																													}
+																												>
+																													Edit
+																												</Button>
+																												<Button
+																													type="button"
+																													variant="ghost"
+																													size="icon"
+																													className="h-8 w-8 shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
+																													disabled={
+																														taskBusy
+																													}
+																													aria-label="Delete follow-up"
+																													title="Delete follow-up"
+																													onClick={() =>
+																														void handleDeleteFollowUpTask(
+																															t,
+																														)
+																													}
+																												>
+																													<LuTrash2 className="h-3.5 w-3.5" />
+																												</Button>
+																											</>
+																										) : null}
+																										<FollowUpSourceButton
+																											updateId={
+																												t.external_note_update_id
+																											}
+																											onViewSource={(
+																												id,
+																											) =>
+																												setFollowUpSourceId(
+																													id,
+																												)
+																											}
+																										/>
+																									</div>
+																								) : null}
+																							</div>
+																						</div>
+																					)}
+																				</SortableOpenFollowUpRow>
+																			)
+																		},
 																	)}
-																	{note ? (
-																		<div className="flex shrink-0 flex-col items-end justify-center gap-1 sm:flex-row sm:items-center">
-																			{!isEditing ? (
-																				<Button
-																					type="button"
-																					variant="ghost"
-																					size="sm"
-																					className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
-																					onClick={() =>
-																						startEditingTask(
-																							t,
-																						)
-																					}
-																				>
-																					Edit
-																				</Button>
-																			) : null}
-																			<FollowUpSourceButton
-																				updateId={
-																					t.external_note_update_id
-																				}
-																				onViewSource={(id) =>
-																					setFollowUpSourceId(
-																						id,
-																					)
-																				}
-																			/>
-																		</div>
-																	) : null}
-																</div>
-															</div>
-														</li>
-													)
-												})}
-											</ul>
-											{openFollowUps.length > TASK_PAGE_SIZE ? (
+																</ul>
+															</SortableContext>
+														</DndContext>
+													</div>
+												)
+											})}
+											{openDueGroups.length >
+											OPEN_DUE_GROUPS_PAGE_SIZE ? (
 												<HistoryPaginationFooter
-													total={openFollowUps.length}
-													skip={openTaskSkipEff}
-													pageItemCount={openTasksPage.length}
+													total={openDueGroups.length}
+													skip={openDueGroupSkipEff}
+													pageItemCount={
+														visibleOpenDueGroups.length
+													}
 													loading={false}
-													pageSize={TASK_PAGE_SIZE}
+													pageSize={
+														OPEN_DUE_GROUPS_PAGE_SIZE
+													}
 													onPrev={() =>
-														setTaskOpenSkip((s) =>
-															Math.max(
-																0,
-																s - TASK_PAGE_SIZE,
-															),
+														setTaskOpenGroupSkip(
+															(s) =>
+																Math.max(
+																	0,
+																	s -
+																		OPEN_DUE_GROUPS_PAGE_SIZE,
+																),
 														)
 													}
 													onNext={() =>
-														setTaskOpenSkip((s) =>
-															Math.min(
-																Math.max(
-																	0,
-																	(Math.ceil(
-																		openFollowUps.length /
-																			TASK_PAGE_SIZE,
-																	) -
-																		1) *
-																		TASK_PAGE_SIZE,
-																),
-																s + TASK_PAGE_SIZE,
-															),
+														setTaskOpenGroupSkip(
+															(s) => {
+																const total =
+																	openDueGroups.length
+																const maxSkip =
+																	total === 0
+																		? 0
+																		: Math.floor(
+																					(total -
+																						1) /
+																						OPEN_DUE_GROUPS_PAGE_SIZE,
+																				) *
+																			OPEN_DUE_GROUPS_PAGE_SIZE
+																return Math.min(
+																	maxSkip,
+																	s +
+																		OPEN_DUE_GROUPS_PAGE_SIZE,
+																)
+															},
 														)
 													}
 												/>
@@ -1518,35 +2061,71 @@ function NoteDetailPage() {
 									<div className="space-y-2">
 										<ul className="space-y-2">
 											{doneTasksPage.map((t) => {
-												const isEditing = editingTaskId === t.id
+												const isEditing =
+													editingTaskId === t.id
+												const taskBusy =
+													deletingTaskId === t.id
 												return (
 													<li key={t.id}>
-														<div className="flex flex-col gap-2 rounded-md border border-transparent px-1 py-1 hover:border-border">
+														<div
+															className={cn(
+																"flex flex-col gap-2 rounded-md border border-transparent px-1 py-1 hover:border-border",
+																taskBusy &&
+																	"pointer-events-none opacity-60",
+															)}
+														>
 															<div
-																className={`flex justify-between gap-2 ${isEditing ? "items-start" : "items-center"}`}
+																className={`flex justify-between gap-2 ${
+																	isEditing
+																		? "items-start"
+																		: "items-center"
+																}`}
 															>
 																{isEditing ? (
 																	<div className="min-w-0 flex-1 space-y-2">
 																		<textarea
-																			value={taskEditTitle}
-																			onChange={(e) =>
+																			value={
+																				taskEditTitle
+																			}
+																			onChange={(
+																				e,
+																			) =>
 																				setTaskEditTitle(
-																					e.target.value,
+																					e
+																						.target
+																						.value,
 																				)
 																			}
-																			rows={3}
+																			rows={
+																				3
+																			}
+																			disabled={
+																				taskBusy
+																			}
 																			className="w-full resize-y rounded-md border border-input bg-background px-2 py-1.5 text-sm text-foreground shadow-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
 																		/>
 																		<div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end">
 																			<label className="flex min-w-0 flex-1 flex-col gap-1 text-xs text-muted-foreground">
-																				<span>Due (optional)</span>
+																				<span>
+																					Due
+																					(optional)
+																				</span>
 																				<input
 																					type="datetime-local"
-																					value={taskEditDueLocal}
-																					onChange={(e) =>
+																					value={
+																						taskEditDueLocal
+																					}
+																					onChange={(
+																						e,
+																					) =>
 																						setTaskEditDueLocal(
-																							e.target.value,
+																							e
+																								.target
+																								.value,
 																						)
+																					}
+																					disabled={
+																						taskBusy
 																					}
 																					className="w-full min-w-0 rounded-md border border-input bg-background px-2 py-1.5 text-sm text-foreground shadow-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring sm:max-w-xs"
 																				/>
@@ -1556,19 +2135,30 @@ function NoteDetailPage() {
 																				variant="outline"
 																				size="sm"
 																				className="w-fit shrink-0"
+																				disabled={
+																					taskBusy
+																				}
 																				onClick={() =>
-																					setTaskEditDueLocal("")
+																					setTaskEditDueLocal(
+																						"",
+																					)
 																				}
 																			>
-																				Clear due
+																				Clear
+																				due
 																			</Button>
 																		</div>
 																		<div className="flex flex-wrap gap-2">
 																			<Button
 																				type="button"
 																				size="sm"
+																				disabled={
+																					taskBusy
+																				}
 																				onClick={() =>
-																					void saveEditingTask(t)
+																					void saveEditingTask(
+																						t,
+																					)
 																				}
 																			>
 																				Save
@@ -1577,9 +2167,29 @@ function NoteDetailPage() {
 																				type="button"
 																				variant="outline"
 																				size="sm"
-																				onClick={cancelEditingTask}
+																				disabled={
+																					taskBusy
+																				}
+																				onClick={
+																					cancelEditingTask
+																				}
 																			>
 																				Cancel
+																			</Button>
+																			<Button
+																				type="button"
+																				variant="destructive"
+																				size="sm"
+																				disabled={
+																					taskBusy
+																				}
+																				onClick={() =>
+																					void handleDeleteFollowUpTask(
+																						t,
+																					)
+																				}
+																			>
+																				Delete
 																			</Button>
 																		</div>
 																	</div>
@@ -1589,28 +2199,54 @@ function NoteDetailPage() {
 																			id={`task-done-${t.id}`}
 																			type="checkbox"
 																			className="h-4 w-4 shrink-0 rounded border-input"
-																			checked={t.done}
+																			checked={
+																				t.done
+																			}
+																			disabled={
+																				taskBusy
+																			}
+																			aria-label={`Mark not done: ${t.title}`}
 																			onChange={() =>
-																				void toggleNoteTask(t)
+																				void toggleNoteTask(
+																					t,
+																				)
 																			}
 																		/>
-																		<label
-																			htmlFor={`task-done-${t.id}`}
-																			className="min-w-0 flex-1 cursor-pointer text-sm leading-relaxed text-muted-foreground line-through"
-																		>
-																			{t.title}
-																		</label>
+																		<span className="min-w-0 flex-1 text-sm leading-relaxed text-muted-foreground line-through">
+																			{
+																				t.title
+																			}
+																		</span>
 																		{note ? (
 																			<TaskDuePostponeDropdown
-																				noteId={note.id}
-																				taskId={t.id}
-																				dueAt={t.due_at}
+																				noteId={
+																					note.id
+																				}
+																				taskId={
+																					t.id
+																				}
+																				dueAt={
+																					t.due_at
+																				}
 																				density="compact"
 																				variant="done"
-																				onError={(msg) =>
-																					setError(msg)
+																				disabled={
+																					taskBusy
 																				}
-																				onPatched={(n) => setNote(n)}
+																				onError={(
+																					msg,
+																				) =>
+																					setError(
+																						msg,
+																					)
+																				}
+																				onPatched={(
+																					n,
+																				) =>
+																					setNote(
+																						n,
+																					)
+																				}
 																			/>
 																		) : null}
 																	</div>
@@ -1618,24 +2254,53 @@ function NoteDetailPage() {
 																{note ? (
 																	<div className="flex shrink-0 flex-col items-end justify-center gap-1 sm:flex-row sm:items-center">
 																		{!isEditing ? (
-																			<Button
-																				type="button"
-																				variant="ghost"
-																				size="sm"
-																				className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
-																				onClick={() =>
-																					startEditingTask(t)
-																				}
-																			>
-																				Edit
-																			</Button>
+																			<>
+																				<Button
+																					type="button"
+																					variant="ghost"
+																					size="sm"
+																					className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
+																					disabled={
+																						taskBusy
+																					}
+																					onClick={() =>
+																						startEditingTask(
+																							t,
+																						)
+																					}
+																				>
+																					Edit
+																				</Button>
+																				<Button
+																					type="button"
+																					variant="ghost"
+																					size="icon"
+																					className="h-8 w-8 shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
+																					disabled={
+																						taskBusy
+																					}
+																					aria-label="Delete follow-up"
+																					title="Delete follow-up"
+																					onClick={() =>
+																						void handleDeleteFollowUpTask(
+																							t,
+																						)
+																					}
+																				>
+																					<LuTrash2 className="h-3.5 w-3.5" />
+																				</Button>
+																			</>
 																		) : null}
 																		<FollowUpSourceButton
 																			updateId={
 																				t.external_note_update_id
 																			}
-																			onViewSource={(id) =>
-																				setFollowUpSourceId(id)
+																			onViewSource={(
+																				id,
+																			) =>
+																				setFollowUpSourceId(
+																					id,
+																				)
 																			}
 																		/>
 																	</div>
@@ -1646,11 +2311,14 @@ function NoteDetailPage() {
 												)
 											})}
 										</ul>
-										{doneFollowUps.length > TASK_PAGE_SIZE ? (
+										{doneFollowUps.length >
+										TASK_PAGE_SIZE ? (
 											<HistoryPaginationFooter
 												total={doneFollowUps.length}
 												skip={doneTaskSkipEff}
-												pageItemCount={doneTasksPage.length}
+												pageItemCount={
+													doneTasksPage.length
+												}
 												loading={false}
 												pageSize={TASK_PAGE_SIZE}
 												onPrev={() =>
@@ -1696,8 +2364,8 @@ function NoteDetailPage() {
 								/>
 								<div className="rounded-xl border border-dashed border-violet-300/60 bg-gradient-to-br from-violet-50/70 via-sky-50/40 to-amber-50/50 px-5 py-8 text-center dark:border-violet-700/50 dark:from-violet-950/35 dark:via-sky-950/25 dark:to-amber-950/20">
 									<p className="text-muted-foreground">
-										No sections yet. Add one above or use the
-										toolbar.
+										No sections yet. Add one above or use
+										the toolbar.
 									</p>
 								</div>
 							</div>
@@ -1725,7 +2393,9 @@ function NoteDetailPage() {
 											onCancelEdit={() =>
 												setEditingChunkId(null)
 											}
-											onSave={(md) => void saveChunk(c, md)}
+											onSave={(md) =>
+												void saveChunk(c, md)
+											}
 											onDelete={() => void removeChunk(c)}
 											onSectionHistory={() => {
 												setSectionHistoryChunkId(c.id)
@@ -1745,7 +2415,9 @@ function NoteDetailPage() {
 										<SectionInsertRow
 											disabled={loading}
 											onInsert={() =>
-												void addChunkAtIndex(chunkIndex + 1)
+												void addChunkAtIndex(
+													chunkIndex + 1,
+												)
 											}
 										/>
 									</Fragment>
@@ -1782,9 +2454,8 @@ function TaskHistoryRow({
 	onViewIncomingUpdate?: (updateId: string | null) => void
 }) {
 	const label = event.deleted ? "Follow-up removed" : "Follow-up task"
-	const prevTitle =
-		previous && !previous.deleted ? (previous.title ?? "") : ""
-	const curTitle = event.deleted ? "" : (event.title ?? "")
+	const prevTitle = previous && !previous.deleted ? previous.title ?? "" : ""
+	const curTitle = event.deleted ? "" : event.title ?? ""
 	const titleChanged = prevTitle !== curTitle
 	const doneChangedTight =
 		previous == null ||
@@ -1798,10 +2469,7 @@ function TaskHistoryRow({
 	const sortChanged =
 		previous != null && previous.sort_order !== event.sort_order
 	const anyChange =
-		titleChanged ||
-		doneChangedTight ||
-		dueChanged ||
-		sortChanged
+		titleChanged || doneChangedTight || dueChanged || sortChanged
 	return (
 		<div className="space-y-2">
 			<div className="flex flex-wrap items-start justify-between gap-2">
@@ -1848,9 +2516,7 @@ function TaskHistoryRow({
 					</p>
 					<LineDiffBlock
 						before={
-							previous == null
-								? ""
-								: taskDoneLabel(previous.done)
+							previous == null ? "" : taskDoneLabel(previous.done)
 						}
 						after={event.deleted ? "" : taskDoneLabel(event.done)}
 					/>
@@ -1934,7 +2600,10 @@ function NoteHistoryRow({
 					<p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
 						Description
 					</p>
-					<LineDiffBlock before={prevDescription} after={curDescription} />
+					<LineDiffBlock
+						before={prevDescription}
+						after={curDescription}
+					/>
 				</div>
 			) : null}
 			{archivedChanged ? (

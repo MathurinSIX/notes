@@ -1,4 +1,4 @@
-import { listNotes, MY_EXTERNAL_NOTE_UPDATES_QUERY_KEY } from "@/api/notes"
+import { MY_EXTERNAL_NOTE_UPDATES_QUERY_KEY, listNotes } from "@/api/notes"
 import { startUpdateNotesWorkflow } from "@/api/workflow"
 import { ApiError } from "@/client"
 import { NextActionsHeaderLink } from "@/components/NextActionsHeaderLink"
@@ -7,13 +7,13 @@ import { OpenUpdateNotesModalContext } from "@/components/UpdateNotesModalContex
 import { WorkflowTopBarIndicator } from "@/components/WorkflowTopBarIndicator"
 import { Button } from "@/components/ui/button"
 import { ColorModeButton, useColorModeValue } from "@/components/ui/color-mode"
-import { logout } from "@/hooks/useAuth"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
+import { logout } from "@/hooks/useAuth"
 import { ONGOING_WORKFLOW_RUNS_QUERY_KEY } from "@/lib/ongoingWorkflowRunsQuery"
 import { isPwaStandalone } from "@/lib/pwa"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { MdLogout } from "react-icons/md"
 
 interface HomeLayoutProps {
@@ -32,6 +32,7 @@ export function HomeLayout({ children }: HomeLayoutProps) {
 	const [updateNotesError, setUpdateNotesError] = useState<string | null>(
 		null,
 	)
+	const updateNotesBodyRef = useRef<HTMLTextAreaElement | null>(null)
 
 	const { data: updateNotesPickerNotes } = useQuery({
 		queryKey: ["notes", "updateNotesModalPicker"],
@@ -46,6 +47,14 @@ export function HomeLayout({ children }: HomeLayoutProps) {
 			window.location.pathname = returnTo
 		}
 	}, [])
+
+	useEffect(() => {
+		if (!updateNotesOpen) return
+		// Focus after dialog content mounts.
+		requestAnimationFrame(() => {
+			updateNotesBodyRef.current?.focus()
+		})
+	}, [updateNotesOpen])
 
 	const submitUpdateNotes = async () => {
 		const body_md = updateNotesText.trim()
@@ -173,72 +182,94 @@ export function HomeLayout({ children }: HomeLayoutProps) {
 						}
 					}}
 				>
-					<DialogContent className="max-w-lg gap-3 p-4 sm:max-w-xl sm:p-5">
-						<DialogTitle className="pr-8 text-lg font-semibold tracking-tight sm:text-xl">
-							Update notes
-						</DialogTitle>
-						<div className="space-y-3">
-							<select
-								id="update-notes-target"
-								aria-label="Match to note"
-								value={updateNotesTargetNoteId ?? ""}
-								onChange={(e) => {
-									const v = e.target.value
-									setUpdateNotesTargetNoteId(
-										v === "" ? null : v,
-									)
-								}}
-								disabled={updateNotesSubmitting}
-								className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-							>
-								<option value="">Automatic</option>
-								{updateNotesPickerRows.map((n) => (
-									<option key={n.id} value={n.id}>
-										{(n.title ?? "").trim() || "Untitled"}
-									</option>
-								))}
-							</select>
-							<textarea
-								id="update-notes-body"
-								aria-label="Text to merge"
-								rows={10}
-								value={updateNotesText}
-								onChange={(e) =>
-									setUpdateNotesText(e.target.value)
-								}
-								disabled={updateNotesSubmitting}
-								placeholder="Plain text…"
-								className="min-h-[12rem] w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm leading-relaxed outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
-							/>
-							{updateNotesError ? (
-								<p
-									role="alert"
-									className="text-sm text-red-600 dark:text-red-400"
+					<DialogContent
+						fullscreen
+						className="left-0 top-0 h-dvh max-h-dvh w-full max-w-none translate-x-0 translate-y-0 gap-0 rounded-none border-0 p-0 shadow-none sm:left-0 sm:top-0 sm:rounded-none"
+					>
+						<div className="flex h-full min-h-0 flex-col">
+							<div className="shrink-0 border-b border-border px-4 py-3 pr-14 sm:px-6 sm:py-4 sm:pr-16">
+								<DialogTitle className="text-xl font-semibold tracking-tight sm:text-2xl">
+									Update notes
+								</DialogTitle>
+							</div>
+							<div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4 sm:gap-4 sm:p-6">
+								<div className="flex shrink-0 flex-col gap-1.5">
+									<label
+										htmlFor="update-notes-target"
+										className="text-sm font-medium text-foreground"
+									>
+										Match to note
+									</label>
+									<select
+										id="update-notes-target"
+										value={updateNotesTargetNoteId ?? ""}
+										onChange={(e) => {
+											const v = e.target.value
+											setUpdateNotesTargetNoteId(
+												v === "" ? null : v,
+											)
+										}}
+										disabled={updateNotesSubmitting}
+										className="w-full rounded-md border border-input bg-background px-3 py-2.5 text-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 sm:text-base"
+									>
+										<option value="">Automatic</option>
+										{updateNotesPickerRows.map((n) => (
+											<option key={n.id} value={n.id}>
+												{(n.title ?? "").trim() ||
+													"Untitled"}
+											</option>
+										))}
+									</select>
+								</div>
+								<div className="flex min-h-0 flex-1 flex-col gap-1.5">
+									<label
+										htmlFor="update-notes-body"
+										className="text-sm font-medium text-foreground"
+									>
+										Text to merge
+									</label>
+									<textarea
+										id="update-notes-body"
+										ref={updateNotesBodyRef}
+										value={updateNotesText}
+										onChange={(e) =>
+											setUpdateNotesText(e.target.value)
+										}
+										disabled={updateNotesSubmitting}
+										placeholder="Plain text…"
+										className="min-h-0 w-full flex-1 resize-y rounded-md border border-input bg-background px-3 py-2.5 text-sm leading-relaxed outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 sm:text-base"
+									/>
+								</div>
+								{updateNotesError ? (
+									<p
+										role="alert"
+										className="shrink-0 text-sm text-red-600 dark:text-red-400"
+									>
+										{updateNotesError}
+									</p>
+								) : null}
+							</div>
+							<div className="flex shrink-0 flex-col-reverse gap-2 border-t border-border p-4 sm:flex-row sm:justify-end sm:gap-3 sm:p-6">
+								<Button
+									type="button"
+									variant="outline"
+									size="sm"
+									disabled={updateNotesSubmitting}
+									onClick={() => setUpdateNotesOpen(false)}
 								>
-									{updateNotesError}
-								</p>
-							) : null}
-						</div>
-						<div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-							<Button
-								type="button"
-								variant="outline"
-								size="sm"
-								disabled={updateNotesSubmitting}
-								onClick={() => setUpdateNotesOpen(false)}
-							>
-								Cancel
-							</Button>
-							<Button
-								type="button"
-								size="sm"
-								disabled={updateNotesSubmitting}
-								onClick={() => void submitUpdateNotes()}
-							>
-								{updateNotesSubmitting
-									? "Starting…"
-									: "Run update"}
-							</Button>
+									Cancel
+								</Button>
+								<Button
+									type="button"
+									size="sm"
+									disabled={updateNotesSubmitting}
+									onClick={() => void submitUpdateNotes()}
+								>
+									{updateNotesSubmitting
+										? "Starting…"
+										: "Run update"}
+								</Button>
+							</div>
 						</div>
 					</DialogContent>
 				</Dialog>

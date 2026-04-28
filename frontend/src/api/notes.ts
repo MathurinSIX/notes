@@ -289,6 +289,7 @@ export async function patchNoteTask(
 		done?: boolean | null
 		title?: string | null
 		due_at?: string | null
+		sort_order?: number | null
 	},
 ): Promise<NoteOut> {
 	return request<NoteOut>(OpenAPI, {
@@ -298,6 +299,17 @@ export async function patchNoteTask(
 		mediaType: "application/json",
 		errors: { 422: "Validation Error" },
 	}) as Promise<NoteOut>
+}
+
+export async function deleteNoteTask(
+	noteId: string,
+	taskId: string,
+): Promise<void> {
+	await request(OpenAPI, {
+		method: "DELETE",
+		url: `/notes/${noteId}/tasks/${taskId}`,
+		errors: { 422: "Validation Error" },
+	})
 }
 
 export async function createNote(body?: {

@@ -168,6 +168,18 @@ async def patch_note_task(
     return await service.patch_note_task(note_id, task_id, data)
 
 
+@router.delete(
+    "/{note_id}/tasks/{task_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_note_task(
+    service: NoteServiceDep,
+    note_id: uuid.UUID,
+    task_id: uuid.UUID,
+) -> None:
+    await service.delete_note_task(note_id, task_id)
+
+
 @router.get("/", response_model=NotesOut, status_code=status.HTTP_200_OK)
 async def list_notes(
     service: NoteServiceDep,

@@ -89,6 +89,7 @@ class NoteTaskPatch(SQLModel):
     done: bool | None = None
     title: str | None = Field(default=None, max_length=4000)
     due_at: datetime | None = None
+    sort_order: int | None = Field(default=None, ge=0)
 
     @field_validator("title")
     @classmethod

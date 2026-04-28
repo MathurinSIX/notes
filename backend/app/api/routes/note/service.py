@@ -534,6 +534,24 @@ class NoteService(BaseService):
             task_display_external_id=task_display_external_id,
         )
 
+    async def delete_note_task(self, note_id: uuid.UUID, task_id: uuid.UUID) -> None:
+        await self.repository.read_by_id(note_id)
+        task = await self.note_task_repository.read_by_id(task_id)
+        if task.note_id != note_id:
+            raise HTTPException(status_code=404, detail="Task not found")
+        await self.timeline.record_task_snapshot(
+            note_id=note_id,
+            task_id=task.id,
+            title=task.title,
+            done=task.done,
+            due_at=task.due_at,
+            sort_order=task.sort_order,
+            deleted=True,
+            editor_id=self.current_user.id,
+            external_note_update_id=task.external_note_update_id,
+        )
+        await self.note_task_repository.delete(task_id)
+
     async def list_incoming_updates(
         self,
         note_id: uuid.UUID,

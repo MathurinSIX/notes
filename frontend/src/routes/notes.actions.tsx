@@ -1,12 +1,16 @@
 import {
 	type NotesNextAction,
+	deleteNoteTask,
 	listNotes,
 	patchNoteTask,
 } from "@/api/notes"
 import { ApiError } from "@/client"
 import { FollowUpSourceButton } from "@/components/IncomingUpdateSourceHint"
+import { NOTES_NEXT_ACTIONS_HEADER_QUERY_KEY } from "@/components/NextActionsHeaderLink"
 import { TaskDuePostponeDropdown } from "@/components/TaskDuePostponeDropdown"
+import { HomeLayout } from "@/components/layouts/HomeLayout"
 import { Button } from "@/components/ui/button"
+import { ensureLoggedIn } from "@/hooks/useAuth"
 import {
 	datetimeLocalValueToIsoUtc,
 	dueAtToDatetimeLocalValue,
@@ -14,13 +18,11 @@ import {
 	formatDueAbsoluteTitle,
 	formatDueRelative,
 } from "@/lib/dueDate"
-import { NOTES_NEXT_ACTIONS_HEADER_QUERY_KEY } from "@/components/NextActionsHeaderLink"
-import { HomeLayout } from "@/components/layouts/HomeLayout"
-import { ensureLoggedIn } from "@/hooks/useAuth"
 import { cn } from "@/lib/utils"
 import { useQueryClient } from "@tanstack/react-query"
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { LuTrash2 } from "react-icons/lu"
 
 const ACTIONS_PAGE_SIZE = 5
 
@@ -81,6 +83,8 @@ function EditFollowUpForm({
 	onClearDue,
 	onSave,
 	onCancel,
+	onDelete,
+	deleteDisabled,
 }: {
 	title: string
 	dueLocal: string
@@ -90,6 +94,8 @@ function EditFollowUpForm({
 	onClearDue: () => void
 	onSave: () => void
 	onCancel: () => void
+	onDelete?: () => void
+	deleteDisabled?: boolean
 }) {
 	return (
 		<div className="min-w-0 flex-1 space-y-2">
@@ -140,6 +146,17 @@ function EditFollowUpForm({
 				>
 					Cancel
 				</Button>
+				{onDelete ? (
+					<Button
+						type="button"
+						variant="destructive"
+						size="sm"
+						disabled={saving || deleteDisabled}
+						onClick={onDelete}
+					>
+						Delete
+					</Button>
+				) : null}
 			</div>
 		</div>
 	)
@@ -167,6 +184,7 @@ function ActionsPage() {
 	const [taskEditTitle, setTaskEditTitle] = useState("")
 	const [taskEditDueLocal, setTaskEditDueLocal] = useState("")
 	const [savingTaskId, setSavingTaskId] = useState<string | null>(null)
+	const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null)
 	const [patchingDueTaskId, setPatchingDueTaskId] = useState<string | null>(
 		null,
 	)
@@ -231,14 +249,12 @@ function ActionsPage() {
 	}, [recentDoneActions.length])
 
 	const pagedNextActions = useMemo(
-		() =>
-			nextActions.slice(openSkip, openSkip + ACTIONS_PAGE_SIZE),
+		() => nextActions.slice(openSkip, openSkip + ACTIONS_PAGE_SIZE),
 		[nextActions, openSkip],
 	)
 
 	const pagedRecentDone = useMemo(
-		() =>
-			recentDoneActions.slice(doneSkip, doneSkip + ACTIONS_PAGE_SIZE),
+		() => recentDoneActions.slice(doneSkip, doneSkip + ACTIONS_PAGE_SIZE),
 		[recentDoneActions, doneSkip],
 	)
 
@@ -305,7 +321,10 @@ function ActionsPage() {
 				const da = res.recent_done_actions ?? []
 				setNextActions(na)
 				setRecentDoneActions(da)
-				queryClient.setQueryData(NOTES_NEXT_ACTIONS_HEADER_QUERY_KEY, na)
+				queryClient.setQueryData(
+					NOTES_NEXT_ACTIONS_HEADER_QUERY_KEY,
+					na,
+				)
 				setEditingTaskId(null)
 			} catch (e) {
 				let msg = "Could not update follow-up"
@@ -325,6 +344,45 @@ function ActionsPage() {
 			}
 		},
 		[queryClient, taskEditTitle, taskEditDueLocal],
+	)
+
+	const deleteFollowUp = useCallback(
+		async (a: NotesNextAction) => {
+			if (
+				!window.confirm("Delete this follow-up? This cannot be undone.")
+			) {
+				return
+			}
+			setDeletingTaskId(a.task_id)
+			setError(null)
+			try {
+				await deleteNoteTask(a.note_id, a.task_id)
+				setEditingTaskId(null)
+				const res = await listNotes({ archived: false })
+				const na = res.next_actions ?? []
+				const da = res.recent_done_actions ?? []
+				setNextActions(na)
+				setRecentDoneActions(da)
+				queryClient.setQueryData(
+					NOTES_NEXT_ACTIONS_HEADER_QUERY_KEY,
+					na,
+				)
+			} catch (e) {
+				let msg = "Could not delete follow-up"
+				if (
+					e instanceof ApiError &&
+					e.body &&
+					typeof e.body === "object"
+				) {
+					const d = e.body as { detail?: unknown }
+					if (d.detail) msg = String(d.detail)
+				} else if (e instanceof Error) msg = e.message
+				setError(msg)
+			} finally {
+				setDeletingTaskId((id) => (id === a.task_id ? null : id))
+			}
+		},
+		[queryClient],
 	)
 
 	const markNextActionUndone = async (a: NotesNextAction) => {
@@ -376,7 +434,8 @@ function ActionsPage() {
 				) : !hasAny ? (
 					<div className="rounded-xl border border-dashed border-teal-200/70 bg-gradient-to-br from-teal-50/60 via-card to-card px-6 py-12 text-center dark:border-teal-800/40 dark:from-teal-950/25 dark:via-card dark:to-card">
 						<p className="text-muted-foreground">
-							When active notes have follow-ups, they show up here.{" "}
+							When active notes have follow-ups, they show up
+							here.{" "}
 							<Link
 								to="/notes"
 								className="font-medium text-primary underline-offset-4 hover:underline"
@@ -397,128 +456,219 @@ function ActionsPage() {
 										Next actions
 									</h2>
 									<p className="text-xs text-muted-foreground">
-										Open follow-ups on active notes, soonest due
-										first. Use the checkbox to mark one done
-										without opening the note.
+										Open follow-ups on active notes, soonest
+										due first. Use the checkbox to mark one
+										done without opening the note.
 									</p>
 								</div>
 								<ol className="list-none space-y-1.5 p-0">
-								{pagedNextActions.map((a) => {
-									const noteTitle =
-										a.note_title?.trim() || "Untitled"
-									const busy =
-										completingTaskIds.has(a.task_id) ||
-										patchingDueTaskId === a.task_id
-									const isEditing = editingTaskId === a.task_id
-									const isSaving = savingTaskId === a.task_id
-									return (
-										<li key={`${a.note_id}-${a.task_id}`}>
-											<div
-												className={cn(
-													"flex flex-col gap-2 rounded-lg border border-transparent px-2 py-2 transition-colors hover:border-border hover:bg-muted/30 sm:flex-row sm:items-start sm:gap-3",
-													!isEditing &&
-														busy &&
-														"pointer-events-none opacity-60",
-												)}
+									{pagedNextActions.map((a) => {
+										const noteTitle =
+											a.note_title?.trim() || "Untitled"
+										const busy =
+											completingTaskIds.has(a.task_id) ||
+											patchingDueTaskId === a.task_id ||
+											deletingTaskId === a.task_id
+										const isEditing =
+											editingTaskId === a.task_id
+										const isSaving =
+											savingTaskId === a.task_id
+										return (
+											<li
+												key={`${a.note_id}-${a.task_id}`}
 											>
-												{isEditing ? (
-													<EditFollowUpForm
-														title={taskEditTitle}
-														dueLocal={taskEditDueLocal}
-														saving={isSaving}
-														onTitleChange={setTaskEditTitle}
-														onDueLocalChange={setTaskEditDueLocal}
-														onClearDue={() =>
-															setTaskEditDueLocal("")
-														}
-														onSave={() =>
-															void saveEditingTask(a)
-														}
-														onCancel={cancelEditingTask}
-													/>
-												) : (
-													<>
-														<input
-															type="checkbox"
-															className="mt-0.5 h-4 w-4 shrink-0 rounded border-input sm:mt-0"
-															checked={false}
-															disabled={busy}
-															aria-label={`Mark done: ${a.task_title}`}
-															onChange={() =>
-																void markNextActionDone(a)
+												<div
+													className={cn(
+														"flex flex-col gap-2 rounded-lg border border-transparent px-2 py-2 transition-colors hover:border-border hover:bg-muted/30 sm:flex-row sm:items-start sm:gap-3",
+														busy &&
+															"pointer-events-none opacity-60",
+													)}
+												>
+													{isEditing ? (
+														<EditFollowUpForm
+															title={
+																taskEditTitle
+															}
+															dueLocal={
+																taskEditDueLocal
+															}
+															saving={isSaving}
+															onTitleChange={
+																setTaskEditTitle
+															}
+															onDueLocalChange={
+																setTaskEditDueLocal
+															}
+															onClearDue={() =>
+																setTaskEditDueLocal(
+																	"",
+																)
+															}
+															onSave={() =>
+																void saveEditingTask(
+																	a,
+																)
+															}
+															onCancel={
+																cancelEditingTask
+															}
+															onDelete={() =>
+																void deleteFollowUp(
+																	a,
+																)
+															}
+															deleteDisabled={
+																deletingTaskId ===
+																a.task_id
 															}
 														/>
-														<div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
-															<Link
-																to="/notes/$noteId"
-																params={{ noteId: a.note_id }}
-																className="min-w-0 flex-1 rounded-md outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-															>
-																<p className="text-sm font-medium leading-snug text-foreground">
-																	{a.task_title}
-																</p>
-																<p className="mt-0.5 truncate text-xs text-muted-foreground">
-																	<span className="text-muted-foreground/80">
-																		Note
-																	</span>{" "}
-																	· {noteTitle}
-																</p>
-															</Link>
-															<div className="flex shrink-0 flex-row items-center gap-1.5 self-end sm:self-auto">
-																<TaskDuePostponeDropdown
-																	noteId={a.note_id}
-																	taskId={a.task_id}
-																	dueAt={a.due_at}
-																	density="comfortable"
-																	variant="open"
-																	disabled={busy}
-																	onPatchingChange={(v) => {
-																		if (v)
-																			setPatchingDueTaskId(a.task_id)
-																		else
-																			setPatchingDueTaskId((id) =>
-																				id === a.task_id ? null : id,
-																			)
+													) : (
+														<>
+															<input
+																type="checkbox"
+																className="mt-0.5 h-4 w-4 shrink-0 rounded border-input sm:mt-0"
+																checked={false}
+																disabled={busy}
+																aria-label={`Mark done: ${a.task_title}`}
+																onChange={() =>
+																	void markNextActionDone(
+																		a,
+																	)
+																}
+															/>
+															<div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
+																<Link
+																	to="/notes/$noteId"
+																	params={{
+																		noteId: a.note_id,
 																	}}
-																	onError={(msg) => setError(msg)}
-																	onPatched={async () => {
-																		await load()
-																	}}
-																/>
-																<Button
-																	type="button"
-																	variant="ghost"
-																	size="sm"
-																	className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
-																	disabled={busy}
-																	onClick={() =>
-																		startEditingTask(a)
-																	}
+																	className="min-w-0 flex-1 rounded-md outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
 																>
-																	Edit
-																</Button>
-																<FollowUpSourceButton
-																	updateId={a.external_note_update_id}
-																	onViewSource={(id) =>
-																		void navigate({
-																			to: "/notes/$noteId",
-																			params: {
-																				noteId: a.note_id,
-																			},
-																			search: {
-																				followUpSource: id,
-																			},
-																		})
-																	}
-																/>
+																	<p className="text-sm font-medium leading-snug text-foreground">
+																		{
+																			a.task_title
+																		}
+																	</p>
+																	<p className="mt-0.5 truncate text-xs text-muted-foreground">
+																		<span className="text-muted-foreground/80">
+																			Note
+																		</span>{" "}
+																		·{" "}
+																		{
+																			noteTitle
+																		}
+																	</p>
+																</Link>
+																<div className="flex shrink-0 flex-row items-center gap-1.5 self-end sm:self-auto">
+																	<TaskDuePostponeDropdown
+																		noteId={
+																			a.note_id
+																		}
+																		taskId={
+																			a.task_id
+																		}
+																		dueAt={
+																			a.due_at
+																		}
+																		density="comfortable"
+																		variant="open"
+																		disabled={
+																			busy
+																		}
+																		onPatchingChange={(
+																			v,
+																		) => {
+																			if (
+																				v
+																			)
+																				setPatchingDueTaskId(
+																					a.task_id,
+																				)
+																			else
+																				setPatchingDueTaskId(
+																					(
+																						id,
+																					) =>
+																						id ===
+																						a.task_id
+																							? null
+																							: id,
+																				)
+																		}}
+																		onError={(
+																			msg,
+																		) =>
+																			setError(
+																				msg,
+																			)
+																		}
+																		onPatched={async () => {
+																			await load()
+																		}}
+																	/>
+																	<Button
+																		type="button"
+																		variant="ghost"
+																		size="sm"
+																		className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
+																		disabled={
+																			busy
+																		}
+																		onClick={() =>
+																			startEditingTask(
+																				a,
+																			)
+																		}
+																	>
+																		Edit
+																	</Button>
+																	<Button
+																		type="button"
+																		variant="ghost"
+																		size="icon"
+																		className="h-8 w-8 shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
+																		disabled={
+																			busy
+																		}
+																		aria-label="Delete follow-up"
+																		title="Delete follow-up"
+																		onClick={() =>
+																			void deleteFollowUp(
+																				a,
+																			)
+																		}
+																	>
+																		<LuTrash2 className="h-3.5 w-3.5" />
+																	</Button>
+																	<FollowUpSourceButton
+																		updateId={
+																			a.external_note_update_id
+																		}
+																		onViewSource={(
+																			id,
+																		) =>
+																			void navigate(
+																				{
+																					to: "/notes/$noteId",
+																					params: {
+																						noteId: a.note_id,
+																					},
+																					search: {
+																						followUpSource:
+																							id,
+																					},
+																				},
+																			)
+																		}
+																	/>
+																</div>
 															</div>
-														</div>
-													</>
-												)}
-											</div>
-										</li>
-									)
-								})}
+														</>
+													)}
+												</div>
+											</li>
+										)
+									})}
 								</ol>
 								<ActionsSectionPagination
 									total={nextActions.length}
@@ -536,9 +686,9 @@ function ActionsPage() {
 												total === 0
 													? 0
 													: Math.floor(
-																(total - 1) /
-																	ACTIONS_PAGE_SIZE,
-															) * ACTIONS_PAGE_SIZE
+															(total - 1) /
+																ACTIONS_PAGE_SIZE,
+													  ) * ACTIONS_PAGE_SIZE
 											return Math.min(
 												s + ACTIONS_PAGE_SIZE,
 												maxSkip,
@@ -562,142 +712,243 @@ function ActionsPage() {
 										Completed
 									</h2>
 									<p className="text-xs text-muted-foreground">
-										Recently finished on active notes. Uncheck to
-										move a follow-up back to open.
+										Recently finished on active notes.
+										Uncheck to move a follow-up back to
+										open.
 									</p>
 								</div>
 								<ol className="list-none space-y-1.5 p-0">
-								{pagedRecentDone.map((a) => {
-									const doneLabel = formatDueRelative(
-										a.done_updated_ts,
-									)
-									const doneTitle = formatDueAbsoluteTitle(
-										a.done_updated_ts,
-									)
-									const noteTitle =
-										a.note_title?.trim() || "Untitled"
-									const busy =
-										completingTaskIds.has(a.task_id) ||
-										patchingDueTaskId === a.task_id
-									const isEditing = editingTaskId === a.task_id
-									const isSaving = savingTaskId === a.task_id
-									return (
-										<li key={`done-${a.note_id}-${a.task_id}`}>
-											<div
-												className={cn(
-													"flex flex-col gap-2 rounded-lg border border-transparent px-2 py-2 transition-colors hover:border-border hover:bg-muted/40 sm:flex-row sm:items-start sm:gap-3",
-													!isEditing &&
-														busy &&
-														"pointer-events-none opacity-60",
-												)}
+									{pagedRecentDone.map((a) => {
+										const doneLabel = formatDueRelative(
+											a.done_updated_ts,
+										)
+										const doneTitle =
+											formatDueAbsoluteTitle(
+												a.done_updated_ts,
+											)
+										const noteTitle =
+											a.note_title?.trim() || "Untitled"
+										const busy =
+											completingTaskIds.has(a.task_id) ||
+											patchingDueTaskId === a.task_id ||
+											deletingTaskId === a.task_id
+										const isEditing =
+											editingTaskId === a.task_id
+										const isSaving =
+											savingTaskId === a.task_id
+										return (
+											<li
+												key={`done-${a.note_id}-${a.task_id}`}
 											>
-												{isEditing ? (
-													<EditFollowUpForm
-														title={taskEditTitle}
-														dueLocal={taskEditDueLocal}
-														saving={isSaving}
-														onTitleChange={setTaskEditTitle}
-														onDueLocalChange={setTaskEditDueLocal}
-														onClearDue={() =>
-															setTaskEditDueLocal("")
-														}
-														onSave={() =>
-															void saveEditingTask(a)
-														}
-														onCancel={cancelEditingTask}
-													/>
-												) : (
-													<>
-														<input
-															type="checkbox"
-															className="mt-0.5 h-4 w-4 shrink-0 rounded border-input sm:mt-0"
-															checked
-															disabled={busy}
-															aria-label={`Mark not done: ${a.task_title}`}
-															onChange={() =>
-																void markNextActionUndone(a)
+												<div
+													className={cn(
+														"flex flex-col gap-2 rounded-lg border border-transparent px-2 py-2 transition-colors hover:border-border hover:bg-muted/40 sm:flex-row sm:items-start sm:gap-3",
+														busy &&
+															"pointer-events-none opacity-60",
+													)}
+												>
+													{isEditing ? (
+														<EditFollowUpForm
+															title={
+																taskEditTitle
+															}
+															dueLocal={
+																taskEditDueLocal
+															}
+															saving={isSaving}
+															onTitleChange={
+																setTaskEditTitle
+															}
+															onDueLocalChange={
+																setTaskEditDueLocal
+															}
+															onClearDue={() =>
+																setTaskEditDueLocal(
+																	"",
+																)
+															}
+															onSave={() =>
+																void saveEditingTask(
+																	a,
+																)
+															}
+															onCancel={
+																cancelEditingTask
+															}
+															onDelete={() =>
+																void deleteFollowUp(
+																	a,
+																)
+															}
+															deleteDisabled={
+																deletingTaskId ===
+																a.task_id
 															}
 														/>
-														<div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
-															<Link
-																to="/notes/$noteId"
-																params={{ noteId: a.note_id }}
-																className="min-w-0 flex-1 rounded-md outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-															>
-																<p className="text-sm font-medium leading-snug text-muted-foreground line-through">
-																	{a.task_title}
-																</p>
-																<p className="mt-0.5 truncate text-xs text-muted-foreground">
-																	<span className="text-muted-foreground/80">
-																		Note
-																	</span>{" "}
-																	· {noteTitle}
-																</p>
-															</Link>
-															<div className="flex shrink-0 flex-row flex-wrap items-center justify-end gap-1.5 self-end text-xs text-muted-foreground sm:self-auto sm:text-right">
-																{doneLabel ? (
-																	<span
-																		title={doneTitle ?? undefined}
-																	>
-																		Done {doneLabel}
-																	</span>
-																) : (
-																	<span>Done</span>
-																)}
-																<TaskDuePostponeDropdown
-																	noteId={a.note_id}
-																	taskId={a.task_id}
-																	dueAt={a.due_at}
-																	density="comfortable"
-																	variant="done"
-																	disabled={busy}
-																	onPatchingChange={(v) => {
-																		if (v)
-																			setPatchingDueTaskId(a.task_id)
-																		else
-																			setPatchingDueTaskId((id) =>
-																				id === a.task_id ? null : id,
-																			)
+													) : (
+														<>
+															<input
+																type="checkbox"
+																className="mt-0.5 h-4 w-4 shrink-0 rounded border-input sm:mt-0"
+																checked
+																disabled={busy}
+																aria-label={`Mark not done: ${a.task_title}`}
+																onChange={() =>
+																	void markNextActionUndone(
+																		a,
+																	)
+																}
+															/>
+															<div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
+																<Link
+																	to="/notes/$noteId"
+																	params={{
+																		noteId: a.note_id,
 																	}}
-																	onError={(msg) => setError(msg)}
-																	onPatched={async () => {
-																		await load()
-																	}}
-																/>
-																<Button
-																	type="button"
-																	variant="ghost"
-																	size="sm"
-																	className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
-																	disabled={busy}
-																	onClick={() =>
-																		startEditingTask(a)
-																	}
+																	className="min-w-0 flex-1 rounded-md outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
 																>
-																	Edit
-																</Button>
-																<FollowUpSourceButton
-																	updateId={a.external_note_update_id}
-																	onViewSource={(id) =>
-																		void navigate({
-																			to: "/notes/$noteId",
-																			params: {
-																				noteId: a.note_id,
-																			},
-																			search: {
-																				followUpSource: id,
-																			},
-																		})
-																	}
-																/>
+																	<p className="text-sm font-medium leading-snug text-muted-foreground line-through">
+																		{
+																			a.task_title
+																		}
+																	</p>
+																	<p className="mt-0.5 truncate text-xs text-muted-foreground">
+																		<span className="text-muted-foreground/80">
+																			Note
+																		</span>{" "}
+																		·{" "}
+																		{
+																			noteTitle
+																		}
+																	</p>
+																</Link>
+																<div className="flex shrink-0 flex-row flex-wrap items-center justify-end gap-1.5 self-end text-xs text-muted-foreground sm:self-auto sm:text-right">
+																	{doneLabel ? (
+																		<span
+																			title={
+																				doneTitle ??
+																				undefined
+																			}
+																		>
+																			Done{" "}
+																			{
+																				doneLabel
+																			}
+																		</span>
+																	) : (
+																		<span>
+																			Done
+																		</span>
+																	)}
+																	<TaskDuePostponeDropdown
+																		noteId={
+																			a.note_id
+																		}
+																		taskId={
+																			a.task_id
+																		}
+																		dueAt={
+																			a.due_at
+																		}
+																		density="comfortable"
+																		variant="done"
+																		disabled={
+																			busy
+																		}
+																		onPatchingChange={(
+																			v,
+																		) => {
+																			if (
+																				v
+																			)
+																				setPatchingDueTaskId(
+																					a.task_id,
+																				)
+																			else
+																				setPatchingDueTaskId(
+																					(
+																						id,
+																					) =>
+																						id ===
+																						a.task_id
+																							? null
+																							: id,
+																				)
+																		}}
+																		onError={(
+																			msg,
+																		) =>
+																			setError(
+																				msg,
+																			)
+																		}
+																		onPatched={async () => {
+																			await load()
+																		}}
+																	/>
+																	<Button
+																		type="button"
+																		variant="ghost"
+																		size="sm"
+																		className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
+																		disabled={
+																			busy
+																		}
+																		onClick={() =>
+																			startEditingTask(
+																				a,
+																			)
+																		}
+																	>
+																		Edit
+																	</Button>
+																	<Button
+																		type="button"
+																		variant="ghost"
+																		size="icon"
+																		className="h-8 w-8 shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
+																		disabled={
+																			busy
+																		}
+																		aria-label="Delete follow-up"
+																		title="Delete follow-up"
+																		onClick={() =>
+																			void deleteFollowUp(
+																				a,
+																			)
+																		}
+																	>
+																		<LuTrash2 className="h-3.5 w-3.5" />
+																	</Button>
+																	<FollowUpSourceButton
+																		updateId={
+																			a.external_note_update_id
+																		}
+																		onViewSource={(
+																			id,
+																		) =>
+																			void navigate(
+																				{
+																					to: "/notes/$noteId",
+																					params: {
+																						noteId: a.note_id,
+																					},
+																					search: {
+																						followUpSource:
+																							id,
+																					},
+																				},
+																			)
+																		}
+																	/>
+																</div>
 															</div>
-														</div>
-													</>
-												)}
-											</div>
-										</li>
-									)
-								})}
+														</>
+													)}
+												</div>
+											</li>
+										)
+									})}
 								</ol>
 								<ActionsSectionPagination
 									total={recentDoneActions.length}
@@ -710,14 +961,15 @@ function ActionsPage() {
 									}
 									onNext={() =>
 										setDoneSkip((s) => {
-											const total = recentDoneActions.length
+											const total =
+												recentDoneActions.length
 											const maxSkip =
 												total === 0
 													? 0
 													: Math.floor(
-																(total - 1) /
-																	ACTIONS_PAGE_SIZE,
-															) * ACTIONS_PAGE_SIZE
+															(total - 1) /
+																ACTIONS_PAGE_SIZE,
+													  ) * ACTIONS_PAGE_SIZE
 											return Math.min(
 												s + ACTIONS_PAGE_SIZE,
 												maxSkip,
