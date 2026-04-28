@@ -220,7 +220,7 @@ test("README screenshots", async ({ page, context }) => {
 	)
 
 	await page.goto("/notes")
-	await expect(page.getByRole("heading", { name: "Notes" })).toBeVisible({
+	await expect(page.getByRole("tab", { name: "Active" })).toBeVisible({
 		timeout: 30_000,
 	})
 	await expect(page.getByRole("button", { name: "New note" })).toBeVisible()
@@ -231,30 +231,21 @@ test("README screenshots", async ({ page, context }) => {
 	})
 
 	await page.getByRole("button", { name: "New note" }).click()
+	await expect(
+		page.getByRole("heading", { name: "New note" }),
+	).toBeVisible()
+	await expect(page.getByRole("textbox", { name: "Title" })).toBeVisible()
+	await page.getByRole("textbox", { name: "Title" }).fill("README screenshot note")
+	await page
+		.getByRole("textbox", { name: "Description" })
+		.fill(
+			"Sample title, description, and markdown section for documentation captures.",
+		)
+	await page.getByRole("button", { name: "Create" }).click()
 	await expect(page).toHaveURL(/\/notes\/[0-9a-f-]{36}/i, { timeout: 30_000 })
 	const noteId = new URL(page.url()).pathname.split("/").pop()
 	if (!noteId) {
 		throw new Error("Could not parse note id from URL")
-	}
-
-	const metaRes = await context.request.patch(
-		`${apiOrigin}/notes/${noteId}`,
-		{
-			headers: apiHeaders({
-				Authorization: `Bearer ${tokens.access_token}`,
-				"Content-Type": "application/json",
-			}),
-			data: JSON.stringify({
-				title: "README screenshot note",
-				description:
-					"Sample title, description, and markdown section for documentation captures.",
-			}),
-		},
-	)
-	if (!metaRes.ok()) {
-		throw new Error(
-			`Patch note failed (HTTP ${metaRes.status()}): ${await metaRes.text()}`,
-		)
 	}
 
 	const readRes = await context.request.get(`${apiOrigin}/notes/${noteId}`, {

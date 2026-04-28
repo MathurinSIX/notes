@@ -3,6 +3,7 @@ import { ApiError } from "@/client"
 import { NOTES_NEXT_ACTIONS_HEADER_QUERY_KEY } from "@/components/NextActionsHeaderLink"
 import { HomeLayout } from "@/components/layouts/HomeLayout"
 import { Button } from "@/components/ui/button"
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { ensureLoggedIn } from "@/hooks/useAuth"
 import { cn } from "@/lib/utils"
 import { useQueryClient } from "@tanstack/react-query"
@@ -29,6 +30,13 @@ function NotesPage() {
 	const [listView, setListView] = useState<"active" | "archived">("active")
 	const [loading, setLoading] = useState(true)
 	const [error, setError] = useState<string | null>(null)
+	const [newNoteOpen, setNewNoteOpen] = useState(false)
+	const [newTitle, setNewTitle] = useState("")
+	const [newDescription, setNewDescription] = useState("")
+	const [newNoteSubmitting, setNewNoteSubmitting] = useState(false)
+	const [newNoteModalError, setNewNoteModalError] = useState<string | null>(
+		null,
+	)
 	const navigate = useNavigate()
 	const queryClient = useQueryClient()
 
@@ -73,13 +81,38 @@ function NotesPage() {
 		if (mounted && loggedIn) void load()
 	}, [mounted, loggedIn, load])
 
-	const handleNewNote = async () => {
+	const openNewNoteModal = () => {
+		setNewNoteModalError(null)
+		setNewTitle("")
+		setNewDescription("")
+		setNewNoteOpen(true)
+	}
+
+	const submitNewNote = async () => {
+		const title = newTitle.trim()
+		if (!title) {
+			setNewNoteModalError("Enter a title.")
+			return
+		}
+		const description = newDescription.trim() || null
+		setNewNoteSubmitting(true)
+		setNewNoteModalError(null)
 		try {
-			const n = await createNote({ title: "Untitled" })
+			const n = await createNote({ title, description })
+			setNewNoteOpen(false)
+			setNewTitle("")
+			setNewDescription("")
 			await load()
 			navigate({ to: "/notes/$noteId", params: { noteId: n.id } })
 		} catch (e) {
-			setError(e instanceof Error ? e.message : "Could not create note")
+			let msg = "Could not create note"
+			if (e instanceof ApiError && e.body && typeof e.body === "object") {
+				const d = e.body as { detail?: unknown }
+				if (d.detail != null) msg = String(d.detail)
+			} else if (e instanceof Error) msg = e.message
+			setNewNoteModalError(msg)
+		} finally {
+			setNewNoteSubmitting(false)
 		}
 	}
 
@@ -136,12 +169,105 @@ function NotesPage() {
 							type="button"
 							size="sm"
 							className="h-7 text-xs"
-							onClick={() => void handleNewNote()}
+							onClick={openNewNoteModal}
 						>
 							New note
 						</Button>
 					) : null}
 				</div>
+
+				<Dialog
+					open={newNoteOpen}
+					onOpenChange={(open) => {
+						setNewNoteOpen(open)
+						if (!open) {
+							setNewNoteModalError(null)
+							setNewTitle("")
+							setNewDescription("")
+						}
+					}}
+				>
+					<DialogContent
+						fullscreen
+						className="left-0 top-0 h-dvh max-h-dvh w-full max-w-none translate-x-0 translate-y-0 gap-0 rounded-none border-0 p-0 shadow-none sm:left-0 sm:top-0 sm:rounded-none"
+					>
+						<div className="flex h-full min-h-0 flex-col">
+							<div className="shrink-0 border-b border-border px-4 py-3 pr-14 sm:px-6 sm:py-4 sm:pr-16">
+								<DialogTitle className="text-xl font-semibold tracking-tight sm:text-2xl">
+									New note
+								</DialogTitle>
+							</div>
+							<div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4 sm:gap-4 sm:p-6">
+								<div className="flex shrink-0 flex-col gap-1.5">
+									<label
+										htmlFor="new-note-title"
+										className="text-sm font-medium text-foreground"
+									>
+										Title
+									</label>
+									<input
+										type="text"
+										id="new-note-title"
+										value={newTitle}
+										onChange={(e) =>
+											setNewTitle(e.target.value)
+										}
+										disabled={newNoteSubmitting}
+										placeholder="Untitled"
+										className="w-full rounded-md border border-input bg-background px-3 py-2.5 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 sm:text-base"
+										autoFocus
+									/>
+								</div>
+								<div className="flex min-h-0 flex-1 flex-col gap-1.5">
+									<label
+										htmlFor="new-note-description"
+										className="text-sm font-medium text-foreground"
+									>
+										Description
+									</label>
+									<textarea
+										id="new-note-description"
+										value={newDescription}
+										onChange={(e) =>
+											setNewDescription(e.target.value)
+										}
+										disabled={newNoteSubmitting}
+										placeholder="Optional"
+										className="min-h-0 w-full flex-1 resize-y rounded-md border border-input bg-background px-3 py-2.5 text-sm leading-relaxed outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 sm:text-base"
+									/>
+								</div>
+								{newNoteModalError ? (
+									<p
+										role="alert"
+										className="shrink-0 text-sm text-red-600 dark:text-red-400"
+									>
+										{newNoteModalError}
+									</p>
+								) : null}
+							</div>
+							<div className="flex shrink-0 flex-col-reverse gap-2 border-t border-border p-4 sm:flex-row sm:justify-end sm:gap-3 sm:p-6">
+								<Button
+									type="button"
+									variant="outline"
+									size="sm"
+									disabled={newNoteSubmitting}
+									onClick={() => setNewNoteOpen(false)}
+								>
+									Cancel
+								</Button>
+								<Button
+									type="button"
+									size="sm"
+									disabled={newNoteSubmitting}
+									onClick={() => void submitNewNote()}
+								>
+									{newNoteSubmitting ? "Creating…" : "Create"}
+								</Button>
+							</div>
+						</div>
+					</DialogContent>
+				</Dialog>
+
 				{error && (
 					<div
 						role="alert"

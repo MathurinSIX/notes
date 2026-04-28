@@ -52,7 +52,8 @@ import {
 	findPreviousTaskEvent,
 } from "@/lib/noteHistoryDiff"
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router"
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react"
+import { LuArchive, LuPencil, LuPlus, LuTrash2 } from "react-icons/lu"
 import { useQuery } from "@tanstack/react-query"
 
 /** Avoid opening the incoming-updates modal twice (e.g. React Strict Mode). */
@@ -124,6 +125,14 @@ function partitionNoteTasks(tasks: NoteTaskOut[] | undefined) {
 		openFollowUps: sorted.filter((t) => !t.done),
 		doneFollowUps: sorted.filter((t) => t.done),
 	}
+}
+
+function sortNoteChunks(chunks: ChunkOut[]): ChunkOut[] {
+	return [...chunks].sort(
+		(a, b) =>
+			a.sort_order - b.sort_order ||
+			a.created_ts.localeCompare(b.created_ts),
+	)
 }
 
 /** Rotating accent for section cards (full class strings for Tailwind JIT). */
@@ -661,17 +670,54 @@ function NoteDetailPage() {
 		}
 	}
 
-	const addChunk = async () => {
+	const addChunkAtIndex = useCallback(
+		async (insertIndex: number) => {
+			try {
+				setError(null)
+				setEditingTitle(false)
+				const created = await createChunk(noteId, { body_md: "" })
+				const afterCreate = await getNote(noteId)
+				const sortedAll = sortNoteChunks(afterCreate.chunks)
+				const newChunk = sortedAll.find((c) => c.id === created.id)
+				if (!newChunk) {
+					throw new Error("New section missing after create")
+				}
+				const others = sortedAll.filter((c) => c.id !== created.id)
+				const idx = Math.max(0, Math.min(insertIndex, others.length))
+				const reordered = [
+					...others.slice(0, idx),
+					newChunk,
+					...others.slice(idx),
+				]
+				await Promise.all(
+					reordered.map((c, i) =>
+						c.sort_order !== i
+							? updateChunk(c.id, { sort_order: i })
+							: Promise.resolve(),
+					),
+				)
+				await load()
+				setEditingChunkId(created.id)
+			} catch (e) {
+				let msg = "Add section failed"
+				if (
+					e instanceof ApiError &&
+					e.body &&
+					typeof e.body === "object"
+				) {
+					const d = e.body as { detail?: unknown }
+					if (d.detail != null) msg = String(d.detail)
+				} else if (e instanceof Error) msg = e.message
+				setError(msg)
+			}
+		},
+		[noteId, load],
+	)
+
+	const addChunk = useCallback(async () => {
 		if (!note) return
-		try {
-			setEditingTitle(false)
-			const created = await createChunk(note.id, { body_md: "" })
-			await load()
-			setEditingChunkId(created.id)
-		} catch (e) {
-			setError(e instanceof Error ? e.message : "Add chunk failed")
-		}
-	}
+		await addChunkAtIndex(sortNoteChunks(note.chunks).length)
+	}, [note, addChunkAtIndex])
 
 	const removeChunk = async (c: ChunkOut) => {
 		if (!note) return
@@ -729,13 +775,7 @@ function NoteDetailPage() {
 		doneTaskSkipEff + TASK_PAGE_SIZE,
 	)
 
-	const sortedChunks = note
-		? [...note.chunks].sort(
-				(a, b) =>
-					a.sort_order - b.sort_order ||
-					a.created_ts.localeCompare(b.created_ts),
-		  )
-		: []
+	const sortedChunks = note ? sortNoteChunks(note.chunks) : []
 
 	const displayTitle = note?.title?.trim() || "Untitled"
 
@@ -752,12 +792,12 @@ function NoteDetailPage() {
 						</span>
 						Notes
 					</Link>
-					<div className="flex shrink-0 flex-wrap justify-end gap-2">
+					<div className="flex shrink-0 flex-wrap justify-end gap-1">
 						<Button
 							type="button"
 							variant="outline"
 							size="sm"
-							className="border-sky-300/70 text-sky-950 hover:bg-sky-50 dark:border-sky-600 dark:text-sky-100 dark:hover:bg-sky-950/50"
+							className="h-7 border-sky-300/70 px-2 text-xs text-sky-950 hover:bg-sky-50 dark:border-sky-600 dark:text-sky-100 dark:hover:bg-sky-950/50"
 							disabled={loading && !note}
 							onClick={() => {
 								setHistoryOpen(true)
@@ -770,7 +810,7 @@ function NoteDetailPage() {
 							type="button"
 							variant="outline"
 							size="sm"
-							className="border-violet-300/70 text-violet-950 hover:bg-violet-50 dark:border-violet-600 dark:text-violet-100 dark:hover:bg-violet-950/50"
+							className="h-7 border-violet-300/70 px-2 text-xs text-violet-950 hover:bg-violet-50 dark:border-violet-600 dark:text-violet-100 dark:hover:bg-violet-950/50"
 							disabled={loading && !note}
 							onClick={() => openIncomingUpdatesModal(null)}
 						>
@@ -780,7 +820,7 @@ function NoteDetailPage() {
 							type="button"
 							variant="outline"
 							size="sm"
-							className="border-emerald-300/70 text-emerald-950 hover:bg-emerald-50 dark:border-emerald-600 dark:text-emerald-100 dark:hover:bg-emerald-950/45"
+							className="h-7 border-emerald-300/70 px-2 text-xs text-emerald-950 hover:bg-emerald-50 dark:border-emerald-600 dark:text-emerald-100 dark:hover:bg-emerald-950/45"
 							disabled={loading && !note}
 							onClick={() => void addChunk()}
 						>
@@ -1126,12 +1166,12 @@ function NoteDetailPage() {
 							</div>
 						) : null}
 
-						<header className="rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/[0.09] via-card/80 to-chart-4/[0.12] p-5 shadow-sm dark:from-primary/[0.14] dark:via-card/60 dark:to-chart-2/25 md:p-6">
+						<header className="rounded-lg border border-primary/15 bg-gradient-to-br from-primary/[0.05] via-card/90 to-chart-4/[0.08] px-3 py-2.5 shadow-sm dark:from-primary/[0.1] dark:via-card/70 dark:to-chart-2/15 sm:px-3.5 sm:py-3">
 							{editingTitle ? (
-								<div className="space-y-3">
+								<div className="space-y-2">
 									<label
 										htmlFor="note-title-edit"
-										className="text-sm font-medium text-muted-foreground"
+										className="text-xs font-medium text-muted-foreground"
 									>
 										Title
 									</label>
@@ -1141,11 +1181,11 @@ function NoteDetailPage() {
 										onChange={(e) =>
 											setTitle(e.target.value)
 										}
-										className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-lg"
+										className="w-full rounded-md border border-input bg-background px-2.5 py-2 text-sm"
 									/>
 									<label
 										htmlFor="note-description-edit"
-										className="text-sm font-medium text-muted-foreground"
+										className="text-xs font-medium text-muted-foreground"
 									>
 										Description
 									</label>
@@ -1155,14 +1195,15 @@ function NoteDetailPage() {
 										onChange={(e) =>
 											setDescription(e.target.value)
 										}
-										rows={4}
+										rows={3}
 										placeholder="Short plain-text description (optional)"
-										className="w-full resize-y rounded-lg border border-input bg-background px-3 py-2.5 text-sm leading-relaxed"
+										className="w-full resize-y rounded-md border border-input bg-background px-2.5 py-2 text-xs leading-relaxed"
 									/>
-									<div className="flex flex-wrap gap-2">
+									<div className="flex flex-wrap gap-1.5">
 										<Button
 											type="button"
 											size="sm"
+											className="h-7 text-xs"
 											onClick={() => void saveTitle()}
 										>
 											Save
@@ -1171,6 +1212,7 @@ function NoteDetailPage() {
 											type="button"
 											size="sm"
 											variant="ghost"
+											className="h-7 text-xs"
 											onClick={cancelTitleEdit}
 										>
 											Cancel
@@ -1178,17 +1220,17 @@ function NoteDetailPage() {
 									</div>
 								</div>
 							) : (
-								<div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
-									<div className="min-w-0 flex-1 space-y-1">
-										<h1 className="line-clamp-2 text-balance text-lg font-semibold leading-snug tracking-tight text-foreground sm:text-xl">
+								<div className="flex flex-col gap-1.5 sm:flex-row sm:items-start sm:justify-between sm:gap-2">
+									<div className="min-w-0 flex-1 space-y-0.5">
+										<h1 className="line-clamp-2 text-balance text-base font-semibold leading-snug tracking-tight text-foreground sm:text-lg">
 											{displayTitle}
 										</h1>
 										{note.description?.trim() ? (
-											<p className="max-w-3xl text-pretty text-sm leading-relaxed text-muted-foreground">
+											<p className="max-w-3xl text-pretty text-xs leading-snug text-muted-foreground">
 												{note.description.trim()}
 											</p>
 										) : null}
-										<p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+										<p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
 											<span className="inline-flex items-center gap-1.5">
 												<span
 													className="h-1.5 w-1.5 shrink-0 rounded-full bg-sky-500 dark:bg-sky-400"
@@ -1218,11 +1260,14 @@ function NoteDetailPage() {
 											) : null}
 										</p>
 									</div>
-									<div className="flex shrink-0 flex-col items-stretch gap-2 self-start sm:items-end">
+									<div className="flex shrink-0 flex-row flex-wrap items-center justify-end gap-0.5 self-start sm:items-center">
 										<Button
 											type="button"
 											variant="outline"
-											size="sm"
+											size="icon"
+											className="h-7 w-7 shrink-0"
+											aria-label="Edit title"
+											title="Edit title"
 											onClick={() => {
 												setEditingChunkId(null)
 												if (note) {
@@ -1234,29 +1279,33 @@ function NoteDetailPage() {
 												setEditingTitle(true)
 											}}
 										>
-											Edit title
+											<LuPencil className="h-3.5 w-3.5" />
 										</Button>
 										{!note.archived ? (
 											<Button
 												type="button"
 												variant="ghost"
-												size="sm"
-												className="text-muted-foreground hover:text-foreground"
+												size="icon"
+												className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
+												aria-label="Archive note"
+												title="Archive note"
 												onClick={() =>
 													void saveArchived(true)
 												}
 											>
-												Archive note
+												<LuArchive className="h-3.5 w-3.5" />
 											</Button>
 										) : null}
 										<Button
 											type="button"
 											variant="ghost"
-											size="sm"
-											className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+											size="icon"
+											className="h-7 w-7 shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
+											aria-label="Delete note"
+											title="Delete note"
 											onClick={() => void handleDeleteNote()}
 										>
-											Delete note
+											<LuTrash2 className="h-3.5 w-3.5" />
 										</Button>
 									</div>
 								</div>
@@ -1270,15 +1319,9 @@ function NoteDetailPage() {
 							>
 								<div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
 									<div className="min-w-0 flex-1">
-										<h2 className="mb-0.5 text-sm font-semibold tracking-wide text-teal-900 dark:text-teal-100">
+										<h2 className="text-sm font-semibold tracking-wide text-teal-900 dark:text-teal-100">
 											Follow-up tasks
 										</h2>
-										<p className="text-xs text-muted-foreground">
-											Merge workflows can change note sections or
-											this list. You can edit a follow-up's text
-											and due date; optional links to the incoming
-											update appear when the model provides them.
-										</p>
 									</div>
 									{doneFollowUps.length > 0 ? (
 										<Button
@@ -1303,9 +1346,6 @@ function NoteDetailPage() {
 								{taskListView === "active" ? (
 									openFollowUps.length > 0 ? (
 										<div className="space-y-2">
-											<p className="text-[11px] font-medium uppercase tracking-wide text-teal-800/80 dark:text-teal-200/90">
-												Open
-											</p>
 											<ul className="space-y-2">
 												{openTasksPage.map((t) => {
 													const dueLabel = formatDueRelative(
@@ -1319,7 +1359,9 @@ function NoteDetailPage() {
 													return (
 														<li key={t.id}>
 															<div className="flex flex-col gap-2 rounded-md border border-transparent px-1 py-1 hover:border-border">
-																<div className="flex items-start justify-between gap-2">
+																<div
+																	className={`flex justify-between gap-2 ${isEditing ? "items-start" : "items-center"}`}
+																>
 																	{isEditing ? (
 																		<div className="min-w-0 flex-1 space-y-2">
 																			<textarea
@@ -1390,10 +1432,10 @@ function NoteDetailPage() {
 																			</div>
 																		</div>
 																	) : (
-																		<label className="flex min-w-0 flex-1 cursor-pointer items-start gap-3">
+																		<label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 sm:gap-3">
 																			<input
 																				type="checkbox"
-																				className="mt-1 h-4 w-4 shrink-0 rounded border-input"
+																				className="h-4 w-4 shrink-0 rounded border-input"
 																				checked={t.done}
 																				onChange={() =>
 																					void toggleNoteTask(
@@ -1401,16 +1443,16 @@ function NoteDetailPage() {
 																					)
 																				}
 																			/>
-																			<span className="min-w-0 text-sm leading-relaxed text-foreground">
-																				<span className="block">
+																			<span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+																				<span className="min-w-0 flex-1 text-sm leading-relaxed text-foreground">
 																					{t.title}
 																				</span>
 																				{dueLabel ? (
 																					<span
 																						className={
 																							dueSoon
-																								? "mt-1.5 inline-flex w-fit max-w-full items-center rounded-md border border-red-400/50 bg-red-500/15 px-2.5 py-1 text-sm font-bold tracking-tight text-red-900 shadow-sm dark:border-red-700/50 dark:bg-red-950/40 dark:text-red-50"
-																								: "mt-1.5 inline-flex w-fit max-w-full items-center rounded-md border border-teal-300/60 bg-teal-500/12 px-2.5 py-1 text-sm font-bold tracking-tight text-teal-950 shadow-sm dark:border-teal-700/45 dark:bg-teal-950/35 dark:text-teal-50"
+																								? "inline-flex shrink-0 items-center rounded-md border border-red-400/50 bg-red-500/15 px-2 py-0.5 text-xs font-semibold tabular-nums tracking-tight text-red-900 shadow-sm dark:border-red-700/50 dark:bg-red-950/40 dark:text-red-50"
+																								: "inline-flex shrink-0 items-center rounded-md border border-teal-300/60 bg-teal-500/12 px-2 py-0.5 text-xs font-semibold tabular-nums tracking-tight text-teal-950 shadow-sm dark:border-teal-700/45 dark:bg-teal-950/35 dark:text-teal-50"
 																						}
 																						title={
 																							dueTitle ??
@@ -1424,7 +1466,7 @@ function NoteDetailPage() {
 																		</label>
 																	)}
 																	{note ? (
-																		<div className="flex shrink-0 flex-col items-end gap-1 sm:flex-row sm:items-start">
+																		<div className="flex shrink-0 flex-col items-end justify-center gap-1 sm:flex-row sm:items-center">
 																			{!isEditing ? (
 																				<Button
 																					type="button"
@@ -1449,7 +1491,6 @@ function NoteDetailPage() {
 																						id,
 																					)
 																				}
-																				className="mt-0.5"
 																			/>
 																		</div>
 																	) : null}
@@ -1500,9 +1541,6 @@ function NoteDetailPage() {
 									)
 								) : doneFollowUps.length > 0 ? (
 									<div className="space-y-2">
-										<p className="text-[11px] font-medium uppercase tracking-wide text-teal-800/80 dark:text-teal-200/90">
-											Done
-										</p>
 										<ul className="space-y-2">
 											{doneTasksPage.map((t) => {
 												const dueLabel = formatDueRelative(t.due_at)
@@ -1512,7 +1550,9 @@ function NoteDetailPage() {
 												return (
 													<li key={t.id}>
 														<div className="flex flex-col gap-2 rounded-md border border-transparent px-1 py-1 hover:border-border">
-															<div className="flex items-start justify-between gap-2">
+															<div
+																className={`flex justify-between gap-2 ${isEditing ? "items-start" : "items-center"}`}
+															>
 																{isEditing ? (
 																	<div className="min-w-0 flex-1 space-y-2">
 																		<textarea
@@ -1572,22 +1612,22 @@ function NoteDetailPage() {
 																		</div>
 																	</div>
 																) : (
-																	<label className="flex min-w-0 flex-1 cursor-pointer items-start gap-3">
+																	<label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 sm:gap-3">
 																		<input
 																			type="checkbox"
-																			className="mt-1 h-4 w-4 shrink-0 rounded border-input"
+																			className="h-4 w-4 shrink-0 rounded border-input"
 																			checked={t.done}
 																			onChange={() =>
 																				void toggleNoteTask(t)
 																			}
 																		/>
-																		<span className="min-w-0 text-sm leading-relaxed text-muted-foreground">
-																			<span className="block line-through">
+																		<span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+																			<span className="min-w-0 flex-1 text-sm leading-relaxed text-muted-foreground line-through">
 																				{t.title}
 																			</span>
 																			{dueLabel ? (
 																				<span
-																					className="mt-1.5 inline-flex w-fit max-w-full rounded-md border border-border bg-muted/60 px-2.5 py-1 text-sm font-bold tracking-tight text-foreground/90 shadow-sm"
+																					className="inline-flex shrink-0 rounded-md border border-border bg-muted/60 px-2 py-0.5 text-xs font-semibold tabular-nums tracking-tight text-foreground/90 shadow-sm"
 																					title={
 																						dueTitle ??
 																						undefined
@@ -1600,7 +1640,7 @@ function NoteDetailPage() {
 																	</label>
 																)}
 																{note ? (
-																	<div className="flex shrink-0 flex-col items-end gap-1 sm:flex-row sm:items-start">
+																	<div className="flex shrink-0 flex-col items-end justify-center gap-1 sm:flex-row sm:items-center">
 																		{!isEditing ? (
 																			<Button
 																				type="button"
@@ -1621,7 +1661,6 @@ function NoteDetailPage() {
 																			onViewSource={(id) =>
 																				setFollowUpSourceId(id)
 																			}
-																			className="mt-0.5"
 																		/>
 																	</div>
 																) : null}
@@ -1674,52 +1713,66 @@ function NoteDetailPage() {
 						) : null}
 
 						{sortedChunks.length === 0 ? (
-							<div className="rounded-xl border border-dashed border-violet-300/60 bg-gradient-to-br from-violet-50/70 via-sky-50/40 to-amber-50/50 px-5 py-8 text-center dark:border-violet-700/50 dark:from-violet-950/35 dark:via-sky-950/25 dark:to-amber-950/20">
-								<p className="text-muted-foreground">
-									No sections yet. Use{" "}
-									<span className="font-semibold text-violet-700 dark:text-violet-300">
-										Add section
-									</span>{" "}
-									above to write in markdown.
-								</p>
+							<div className="flex flex-col gap-2">
+								<SectionInsertRow
+									disabled={loading}
+									onInsert={() => void addChunkAtIndex(0)}
+								/>
+								<div className="rounded-xl border border-dashed border-violet-300/60 bg-gradient-to-br from-violet-50/70 via-sky-50/40 to-amber-50/50 px-5 py-8 text-center dark:border-violet-700/50 dark:from-violet-950/35 dark:via-sky-950/25 dark:to-amber-950/20">
+									<p className="text-muted-foreground">
+										No sections yet. Add one above or use the
+										toolbar.
+									</p>
+								</div>
 							</div>
 						) : (
 							<div className="flex flex-col gap-2">
+								<SectionInsertRow
+									disabled={loading}
+									onInsert={() => void addChunkAtIndex(0)}
+								/>
 								{sortedChunks.map((c, chunkIndex) => (
-									<ChunkBlock
-										key={c.id}
-										accentClassName={
-											SECTION_ACCENT_BAR[
-												chunkIndex %
-													SECTION_ACCENT_BAR.length
-											]
-										}
-										chunk={c}
-										isEditing={editingChunkId === c.id}
-										onStartEdit={() => {
-											setEditingTitle(false)
-											setEditingChunkId(c.id)
-										}}
-										onCancelEdit={() =>
-											setEditingChunkId(null)
-										}
-										onSave={(md) => void saveChunk(c, md)}
-										onDelete={() => void removeChunk(c)}
-										onSectionHistory={() => {
-											setSectionHistoryChunkId(c.id)
-											setSectionHistoryOpen(true)
-											void loadSectionHistory(c.id, 0)
-										}}
-										onViewLinkedUpdate={
-											c.external_note_update_id
-												? () =>
-														void openIncomingUpdatesModal(
-															c.external_note_update_id,
-															c.id,
-														)
-												: undefined
-										}
-									/>
+									<Fragment key={c.id}>
+										<ChunkBlock
+											accentClassName={
+												SECTION_ACCENT_BAR[
+													chunkIndex %
+														SECTION_ACCENT_BAR.length
+												]
+											}
+											chunk={c}
+											isEditing={editingChunkId === c.id}
+											onStartEdit={() => {
+												setEditingTitle(false)
+												setEditingChunkId(c.id)
+											}}
+											onCancelEdit={() =>
+												setEditingChunkId(null)
+											}
+											onSave={(md) => void saveChunk(c, md)}
+											onDelete={() => void removeChunk(c)}
+											onSectionHistory={() => {
+												setSectionHistoryChunkId(c.id)
+												setSectionHistoryOpen(true)
+												void loadSectionHistory(c.id, 0)
+											}}
+											onViewLinkedUpdate={
+												c.external_note_update_id
+													? () =>
+															void openIncomingUpdatesModal(
+																c.external_note_update_id,
+																c.id,
+															)
+													: undefined
+											}
+										/>
+										<SectionInsertRow
+											disabled={loading}
+											onInsert={() =>
+												void addChunkAtIndex(chunkIndex + 1)
+											}
+										/>
+									</Fragment>
 								))}
 							</div>
 						)}
@@ -1976,6 +2029,34 @@ function ChunkHistoryRow({
 	)
 }
 
+function SectionInsertRow({
+	onInsert,
+	disabled,
+}: {
+	onInsert: () => void
+	disabled?: boolean
+}) {
+	return (
+		<div className="group relative -mx-1 flex min-h-[1.25rem] items-center justify-center sm:-mx-2">
+			<button
+				type="button"
+				disabled={disabled}
+				className="flex w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-transparent py-1 text-muted-foreground transition-colors hover:border-primary/35 hover:bg-primary/[0.07] hover:text-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40 [@media(hover:none)]:border-border/50 [@media(hover:none)]:bg-muted/25 [@media(hover:none)]:text-foreground/80"
+				onClick={() => onInsert()}
+				title="Add section here"
+			>
+				<LuPlus
+					className="h-3.5 w-3.5 shrink-0 opacity-40 transition-opacity group-hover:opacity-100 [@media(hover:none)]:opacity-80"
+					aria-hidden
+				/>
+				<span className="text-[10px] font-medium uppercase tracking-wide opacity-0 transition-opacity group-hover:opacity-100 [@media(hover:none)]:opacity-100">
+					Add section
+				</span>
+			</button>
+		</div>
+	)
+}
+
 function ChunkBlock({
 	accentClassName,
 	chunk,
@@ -2128,6 +2209,7 @@ function ChunkBlock({
 				<MarkdownPreview
 					source={chunk.body_md}
 					framed={false}
+					compact
 					className="max-sm:pe-36 sm:pe-44"
 				/>
 			)}

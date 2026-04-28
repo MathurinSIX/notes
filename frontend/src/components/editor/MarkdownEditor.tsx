@@ -269,6 +269,8 @@ export function MarkdownEditor({
 				"markdown-editor-shell relative overflow-hidden rounded-md border border-input bg-background text-foreground",
 				"[&_.w-md-editor]:bg-transparent [&_.w-md-editor-toolbar]:border-border [&_.w-md-editor-toolbar]:bg-muted/40",
 				"[&_.w-md-editor-content]:bg-background",
+				variant === "chunk" &&
+					"[&_textarea.w-md-editor-text-input]:text-sm [&_textarea.w-md-editor-text-input]:leading-relaxed [&_.wmde-markdown]:text-sm [&_.wmde-markdown]:leading-snug",
 				disabled && "pointer-events-none opacity-60",
 				className,
 			)}

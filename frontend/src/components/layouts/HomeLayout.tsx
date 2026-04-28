@@ -4,18 +4,11 @@ import { ApiError } from "@/client"
 import { NextActionsHeaderLink } from "@/components/NextActionsHeaderLink"
 import { ProjectLogo } from "@/components/ProjectLogo"
 import SettingMenu from "@/components/SettingMenu"
-import { MarkdownEditor } from "@/components/editor/MarkdownEditor"
 import { OpenUpdateNotesModalContext } from "@/components/UpdateNotesModalContext"
 import { WorkflowTopBarIndicator } from "@/components/WorkflowTopBarIndicator"
 import { Button } from "@/components/ui/button"
 import { useColorModeValue } from "@/components/ui/color-mode"
-import {
-	Dialog,
-	DialogContent,
-	DialogDescription,
-	DialogHeader,
-	DialogTitle,
-} from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { ONGOING_WORKFLOW_RUNS_QUERY_KEY } from "@/lib/ongoingWorkflowRunsQuery"
 import { isPwaStandalone } from "@/lib/pwa"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
@@ -152,7 +145,7 @@ export function HomeLayout({ children }: HomeLayoutProps) {
 					type="button"
 					variant="updateNotes"
 					onClick={openUpdateNotesModal}
-					className="fixed bottom-[max(1rem,env(safe-area-inset-bottom,0px))] right-[max(1rem,env(safe-area-inset-right,0px))] z-40 h-14 min-w-[10.5rem] rounded-xl px-8 text-base font-semibold shadow-lg ring-1 ring-black/10 hover:brightness-110 hover:shadow-xl active:brightness-95 sm:h-16 sm:min-w-[12rem] sm:px-10 sm:text-lg dark:ring-white/10"
+					className="fixed bottom-[max(1rem,env(safe-area-inset-bottom,0px))] right-[max(1rem,env(safe-area-inset-right,0px))] z-40 h-12 min-w-[9.25rem] rounded-xl px-5 text-sm font-semibold shadow-md ring-1 ring-black/10 hover:brightness-110 hover:shadow-lg active:brightness-95 sm:h-[3.25rem] sm:min-w-[10.5rem] sm:px-6 sm:text-base dark:ring-white/10"
 				>
 					Update notes
 				</Button>
@@ -167,88 +160,42 @@ export function HomeLayout({ children }: HomeLayoutProps) {
 						}
 					}}
 				>
-					<DialogContent className="max-w-4xl">
-						<DialogHeader>
-							<DialogTitle>Update notes</DialogTitle>
-							<DialogDescription asChild>
-								<div className="space-y-2 text-sm text-muted-foreground">
-									<p>
-										Paste text to merge into your
-										best-matching note. A workflow matches
-										using each note&apos;s title and
-										description, then updates sections with
-										AI.
-									</p>
-									<p>
-										With{" "}
-										<strong className="text-foreground">
-											Automatic
-										</strong>
-										, if no note is a clear match the update
-										stops on the{" "}
-										<Link
-											to="/notes/updates"
-											className="font-medium text-primary underline-offset-4 hover:underline"
-										>
-											Updates
-										</Link>{" "}
-										page so you can choose which note to
-										merge into.
-									</p>
-								</div>
-							</DialogDescription>
-						</DialogHeader>
-						<div className="space-y-3 py-1">
-							<div className="space-y-1.5">
-								<label
-									htmlFor="update-notes-target"
-									className="text-sm font-medium text-muted-foreground"
-								>
-									Target note
-									<span className="font-normal text-muted-foreground">
-										{" "}
-										(optional — pick a note to skip AI
-										matching)
-									</span>
-								</label>
-								<select
-									id="update-notes-target"
-									value={updateNotesTargetNoteId ?? ""}
-									onChange={(e) => {
-										const v = e.target.value
-										setUpdateNotesTargetNoteId(
-											v === "" ? null : v,
-										)
-									}}
-									disabled={updateNotesSubmitting}
-									className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
-								>
-									<option value="">
-										Automatic (match by title & description)
-									</option>
-									{updateNotesPickerRows.map((n) => (
-										<option key={n.id} value={n.id}>
-											{(n.title ?? "").trim() ||
-												"Untitled"}
-										</option>
-									))}
-								</select>
-							</div>
-							<label
-								htmlFor="update-notes-body"
-								className="text-sm font-medium text-muted-foreground"
-							>
-								Update text
-							</label>
-							<MarkdownEditor
-								variant="chunk"
-								preview="edit"
-								id="update-notes-body"
-								className="w-full"
-								value={updateNotesText}
-								onChange={setUpdateNotesText}
+					<DialogContent className="max-w-lg gap-3 p-4 sm:max-w-xl sm:p-5">
+						<DialogTitle className="pr-8 text-lg font-semibold tracking-tight sm:text-xl">
+							Update notes
+						</DialogTitle>
+						<div className="space-y-3">
+							<select
+								id="update-notes-target"
+								aria-label="Match to note"
+								value={updateNotesTargetNoteId ?? ""}
+								onChange={(e) => {
+									const v = e.target.value
+									setUpdateNotesTargetNoteId(
+										v === "" ? null : v,
+									)
+								}}
 								disabled={updateNotesSubmitting}
-								placeholder="Write what you want reflected in your notes…"
+								className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+							>
+								<option value="">Automatic</option>
+								{updateNotesPickerRows.map((n) => (
+									<option key={n.id} value={n.id}>
+										{(n.title ?? "").trim() || "Untitled"}
+									</option>
+								))}
+							</select>
+							<textarea
+								id="update-notes-body"
+								aria-label="Text to merge"
+								rows={10}
+								value={updateNotesText}
+								onChange={(e) =>
+									setUpdateNotesText(e.target.value)
+								}
+								disabled={updateNotesSubmitting}
+								placeholder="Plain text…"
+								className="min-h-[12rem] w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm leading-relaxed outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
 							/>
 							{updateNotesError ? (
 								<p
@@ -263,6 +210,7 @@ export function HomeLayout({ children }: HomeLayoutProps) {
 							<Button
 								type="button"
 								variant="outline"
+								size="sm"
 								disabled={updateNotesSubmitting}
 								onClick={() => setUpdateNotesOpen(false)}
 							>
@@ -270,6 +218,7 @@ export function HomeLayout({ children }: HomeLayoutProps) {
 							</Button>
 							<Button
 								type="button"
+								size="sm"
 								disabled={updateNotesSubmitting}
 								onClick={() => void submitUpdateNotes()}
 							>
