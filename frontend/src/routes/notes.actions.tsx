@@ -5,6 +5,7 @@ import {
 } from "@/api/notes"
 import { ApiError } from "@/client"
 import { FollowUpSourceButton } from "@/components/IncomingUpdateSourceHint"
+import { TaskDuePostponeDropdown } from "@/components/TaskDuePostponeDropdown"
 import { Button } from "@/components/ui/button"
 import {
 	datetimeLocalValueToIsoUtc,
@@ -12,8 +13,6 @@ import {
 	dueInstantsEqual,
 	formatDueAbsoluteTitle,
 	formatDueRelative,
-	isDueOverdue,
-	isDueWithinTwentyFourHours,
 } from "@/lib/dueDate"
 import { NOTES_NEXT_ACTIONS_HEADER_QUERY_KEY } from "@/components/NextActionsHeaderLink"
 import { HomeLayout } from "@/components/layouts/HomeLayout"
@@ -168,6 +167,9 @@ function ActionsPage() {
 	const [taskEditTitle, setTaskEditTitle] = useState("")
 	const [taskEditDueLocal, setTaskEditDueLocal] = useState("")
 	const [savingTaskId, setSavingTaskId] = useState<string | null>(null)
+	const [patchingDueTaskId, setPatchingDueTaskId] = useState<string | null>(
+		null,
+	)
 
 	useEffect(() => {
 		setMounted(true)
@@ -402,15 +404,11 @@ function ActionsPage() {
 								</div>
 								<ol className="list-none space-y-1.5 p-0">
 								{pagedNextActions.map((a) => {
-									const dueLabel = formatDueRelative(a.due_at)
-									const dueTitle = formatDueAbsoluteTitle(a.due_at)
-									const overdue = isDueOverdue(a.due_at)
-									const dueSoon = isDueWithinTwentyFourHours(
-										a.due_at,
-									)
 									const noteTitle =
 										a.note_title?.trim() || "Untitled"
-									const busy = completingTaskIds.has(a.task_id)
+									const busy =
+										completingTaskIds.has(a.task_id) ||
+										patchingDueTaskId === a.task_id
 									const isEditing = editingTaskId === a.task_id
 									const isSaving = savingTaskId === a.task_id
 									return (
@@ -467,24 +465,26 @@ function ActionsPage() {
 																</p>
 															</Link>
 															<div className="flex shrink-0 flex-row items-center gap-1.5 self-end sm:self-auto">
-																{dueLabel ? (
-																	<span
-																		title={dueTitle ?? undefined}
-																		className={
-																			overdue
-																				? "rounded-md border border-amber-400/45 bg-amber-500/15 px-2.5 py-1 text-sm font-bold tracking-tight text-amber-950 shadow-sm dark:border-amber-700/40 dark:bg-amber-950/30 dark:text-amber-50"
-																				: dueSoon
-																				  ? "rounded-md border border-red-400/50 bg-red-500/15 px-2.5 py-1 text-sm font-bold tracking-tight text-red-950 shadow-sm dark:border-red-700/50 dark:bg-red-950/35 dark:text-red-50"
-																				  : "rounded-md border border-border bg-muted/70 px-2.5 py-1 text-sm font-bold tracking-tight text-foreground shadow-sm"
-																		}
-																	>
-																		Due {dueLabel}
-																	</span>
-																) : (
-																	<span className="text-xs text-muted-foreground">
-																		No due date
-																	</span>
-																)}
+																<TaskDuePostponeDropdown
+																	noteId={a.note_id}
+																	taskId={a.task_id}
+																	dueAt={a.due_at}
+																	density="comfortable"
+																	variant="open"
+																	disabled={busy}
+																	onPatchingChange={(v) => {
+																		if (v)
+																			setPatchingDueTaskId(a.task_id)
+																		else
+																			setPatchingDueTaskId((id) =>
+																				id === a.task_id ? null : id,
+																			)
+																	}}
+																	onError={(msg) => setError(msg)}
+																	onPatched={async () => {
+																		await load()
+																	}}
+																/>
 																<Button
 																	type="button"
 																	variant="ghost"
@@ -568,8 +568,6 @@ function ActionsPage() {
 								</div>
 								<ol className="list-none space-y-1.5 p-0">
 								{pagedRecentDone.map((a) => {
-									const dueLabel = formatDueRelative(a.due_at)
-									const dueTitle = formatDueAbsoluteTitle(a.due_at)
 									const doneLabel = formatDueRelative(
 										a.done_updated_ts,
 									)
@@ -578,7 +576,9 @@ function ActionsPage() {
 									)
 									const noteTitle =
 										a.note_title?.trim() || "Untitled"
-									const busy = completingTaskIds.has(a.task_id)
+									const busy =
+										completingTaskIds.has(a.task_id) ||
+										patchingDueTaskId === a.task_id
 									const isEditing = editingTaskId === a.task_id
 									const isSaving = savingTaskId === a.task_id
 									return (
@@ -644,14 +644,26 @@ function ActionsPage() {
 																) : (
 																	<span>Done</span>
 																)}
-																{dueLabel ? (
-																	<span
-																		title={dueTitle ?? undefined}
-																		className="rounded-md border border-border bg-muted/50 px-2 py-1 text-xs font-bold tracking-tight text-foreground/90 shadow-sm"
-																	>
-																		Was due {dueLabel}
-																	</span>
-																) : null}
+																<TaskDuePostponeDropdown
+																	noteId={a.note_id}
+																	taskId={a.task_id}
+																	dueAt={a.due_at}
+																	density="comfortable"
+																	variant="done"
+																	disabled={busy}
+																	onPatchingChange={(v) => {
+																		if (v)
+																			setPatchingDueTaskId(a.task_id)
+																		else
+																			setPatchingDueTaskId((id) =>
+																				id === a.task_id ? null : id,
+																			)
+																	}}
+																	onError={(msg) => setError(msg)}
+																	onPatched={async () => {
+																		await load()
+																	}}
+																/>
 																<Button
 																	type="button"
 																	variant="ghost"

@@ -24,6 +24,7 @@ import { MarkdownPreview } from "@/components/editor/MarkdownPreview"
 import { FollowUpSourceModal } from "@/components/FollowUpSourceModal"
 import { FollowUpSourceButton } from "@/components/IncomingUpdateSourceHint"
 import { HomeLayout } from "@/components/layouts/HomeLayout"
+import { TaskDuePostponeDropdown } from "@/components/TaskDuePostponeDropdown"
 import {
 	ONGOING_WORKFLOW_RUNS_QUERY_KEY,
 	ongoingWorkflowRunsQueryOptions,
@@ -41,9 +42,7 @@ import {
 	datetimeLocalValueToIsoUtc,
 	dueAtToDatetimeLocalValue,
 	dueInstantsEqual,
-	formatDueAbsoluteTitle,
 	formatDueRelative,
-	isDueWithinTwentyFourHours,
 } from "@/lib/dueDate"
 import {
 	chunkHistoryDiffText,
@@ -714,11 +713,6 @@ function NoteDetailPage() {
 		[noteId, load],
 	)
 
-	const addChunk = useCallback(async () => {
-		if (!note) return
-		await addChunkAtIndex(sortNoteChunks(note.chunks).length)
-	}, [note, addChunkAtIndex])
-
 	const removeChunk = async (c: ChunkOut) => {
 		if (!note) return
 		if (!window.confirm("Delete this section?")) return
@@ -804,7 +798,7 @@ function NoteDetailPage() {
 								void loadHistory(0)
 							}}
 						>
-							History
+							Change history
 						</Button>
 						<Button
 							type="button"
@@ -814,17 +808,7 @@ function NoteDetailPage() {
 							disabled={loading && !note}
 							onClick={() => openIncomingUpdatesModal(null)}
 						>
-							Incoming updates
-						</Button>
-						<Button
-							type="button"
-							variant="outline"
-							size="sm"
-							className="h-7 border-emerald-300/70 px-2 text-xs text-emerald-950 hover:bg-emerald-50 dark:border-emerald-600 dark:text-emerald-100 dark:hover:bg-emerald-950/45"
-							disabled={loading && !note}
-							onClick={() => void addChunk()}
-						>
-							Add section
+							Sources
 						</Button>
 					</div>
 				</nav>
@@ -1348,13 +1332,6 @@ function NoteDetailPage() {
 										<div className="space-y-2">
 											<ul className="space-y-2">
 												{openTasksPage.map((t) => {
-													const dueLabel = formatDueRelative(
-														t.due_at,
-													)
-													const dueTitle =
-														formatDueAbsoluteTitle(t.due_at)
-													const dueSoon =
-														isDueWithinTwentyFourHours(t.due_at)
 													const isEditing = editingTaskId === t.id
 													return (
 														<li key={t.id}>
@@ -1432,38 +1409,36 @@ function NoteDetailPage() {
 																			</div>
 																		</div>
 																	) : (
-																		<label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 sm:gap-3">
+																		<div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
 																			<input
+																				id={`task-open-${t.id}`}
 																				type="checkbox"
 																				className="h-4 w-4 shrink-0 rounded border-input"
 																				checked={t.done}
 																				onChange={() =>
-																					void toggleNoteTask(
-																						t,
-																					)
+																					void toggleNoteTask(t)
 																				}
 																			/>
-																			<span className="flex min-w-0 flex-1 items-center justify-between gap-2">
-																				<span className="min-w-0 flex-1 text-sm leading-relaxed text-foreground">
-																					{t.title}
-																				</span>
-																				{dueLabel ? (
-																					<span
-																						className={
-																							dueSoon
-																								? "inline-flex shrink-0 items-center rounded-md border border-red-400/50 bg-red-500/15 px-2 py-0.5 text-xs font-semibold tabular-nums tracking-tight text-red-900 shadow-sm dark:border-red-700/50 dark:bg-red-950/40 dark:text-red-50"
-																								: "inline-flex shrink-0 items-center rounded-md border border-teal-300/60 bg-teal-500/12 px-2 py-0.5 text-xs font-semibold tabular-nums tracking-tight text-teal-950 shadow-sm dark:border-teal-700/45 dark:bg-teal-950/35 dark:text-teal-50"
-																						}
-																						title={
-																							dueTitle ??
-																							undefined
-																						}
-																					>
-																						Due {dueLabel}
-																					</span>
-																				) : null}
-																			</span>
-																		</label>
+																			<label
+																				htmlFor={`task-open-${t.id}`}
+																				className="min-w-0 flex-1 cursor-pointer text-sm leading-relaxed text-foreground"
+																			>
+																				{t.title}
+																			</label>
+																			{note ? (
+																				<TaskDuePostponeDropdown
+																					noteId={note.id}
+																					taskId={t.id}
+																					dueAt={t.due_at}
+																					density="compact"
+																					variant="open"
+																					onError={(msg) =>
+																						setError(msg)
+																					}
+																					onPatched={(n) => setNote(n)}
+																				/>
+																			) : null}
+																		</div>
 																	)}
 																	{note ? (
 																		<div className="flex shrink-0 flex-col items-end justify-center gap-1 sm:flex-row sm:items-center">
@@ -1543,9 +1518,6 @@ function NoteDetailPage() {
 									<div className="space-y-2">
 										<ul className="space-y-2">
 											{doneTasksPage.map((t) => {
-												const dueLabel = formatDueRelative(t.due_at)
-												const dueTitle =
-													formatDueAbsoluteTitle(t.due_at)
 												const isEditing = editingTaskId === t.id
 												return (
 													<li key={t.id}>
@@ -1612,8 +1584,9 @@ function NoteDetailPage() {
 																		</div>
 																	</div>
 																) : (
-																	<label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 sm:gap-3">
+																	<div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
 																		<input
+																			id={`task-done-${t.id}`}
 																			type="checkbox"
 																			className="h-4 w-4 shrink-0 rounded border-input"
 																			checked={t.done}
@@ -1621,23 +1594,26 @@ function NoteDetailPage() {
 																				void toggleNoteTask(t)
 																			}
 																		/>
-																		<span className="flex min-w-0 flex-1 items-center justify-between gap-2">
-																			<span className="min-w-0 flex-1 text-sm leading-relaxed text-muted-foreground line-through">
-																				{t.title}
-																			</span>
-																			{dueLabel ? (
-																				<span
-																					className="inline-flex shrink-0 rounded-md border border-border bg-muted/60 px-2 py-0.5 text-xs font-semibold tabular-nums tracking-tight text-foreground/90 shadow-sm"
-																					title={
-																						dueTitle ??
-																						undefined
-																					}
-																				>
-																					Was due {dueLabel}
-																				</span>
-																			) : null}
-																		</span>
-																	</label>
+																		<label
+																			htmlFor={`task-done-${t.id}`}
+																			className="min-w-0 flex-1 cursor-pointer text-sm leading-relaxed text-muted-foreground line-through"
+																		>
+																			{t.title}
+																		</label>
+																		{note ? (
+																			<TaskDuePostponeDropdown
+																				noteId={note.id}
+																				taskId={t.id}
+																				dueAt={t.due_at}
+																				density="compact"
+																				variant="done"
+																				onError={(msg) =>
+																					setError(msg)
+																				}
+																				onPatched={(n) => setNote(n)}
+																			/>
+																		) : null}
+																	</div>
 																)}
 																{note ? (
 																	<div className="flex shrink-0 flex-col items-end justify-center gap-1 sm:flex-row sm:items-center">
@@ -1713,7 +1689,7 @@ function NoteDetailPage() {
 						) : null}
 
 						{sortedChunks.length === 0 ? (
-							<div className="flex flex-col gap-2">
+							<div className="flex flex-col gap-0">
 								<SectionInsertRow
 									disabled={loading}
 									onInsert={() => void addChunkAtIndex(0)}
@@ -1726,7 +1702,7 @@ function NoteDetailPage() {
 								</div>
 							</div>
 						) : (
-							<div className="flex flex-col gap-2">
+							<div className="flex flex-col gap-0">
 								<SectionInsertRow
 									disabled={loading}
 									onInsert={() => void addChunkAtIndex(0)}
@@ -2037,22 +2013,29 @@ function SectionInsertRow({
 	disabled?: boolean
 }) {
 	return (
-		<div className="group relative -mx-1 flex min-h-[1.25rem] items-center justify-center sm:-mx-2">
-			<button
-				type="button"
-				disabled={disabled}
-				className="flex w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-transparent py-1 text-muted-foreground transition-colors hover:border-primary/35 hover:bg-primary/[0.07] hover:text-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40 [@media(hover:none)]:border-border/50 [@media(hover:none)]:bg-muted/25 [@media(hover:none)]:text-foreground/80"
-				onClick={() => onInsert()}
-				title="Add section here"
-			>
-				<LuPlus
-					className="h-3.5 w-3.5 shrink-0 opacity-40 transition-opacity group-hover:opacity-100 [@media(hover:none)]:opacity-80"
+		<div className="group relative -mx-1 py-2 sm:-mx-2">
+			<div className="relative flex w-full min-h-2 items-center justify-center py-0.5 transition-[min-height,padding] delay-300 duration-200 ease-out group-hover:min-h-10 group-hover:py-1.5 group-focus-within:min-h-10 group-focus-within:py-1.5">
+				<div
+					className="pointer-events-none absolute left-8 right-8 top-1/2 h-px -translate-y-1/2 bg-gradient-to-r from-transparent via-primary/40 to-transparent opacity-0 transition-opacity delay-300 duration-200 group-hover:opacity-100 group-focus-within:opacity-100 sm:left-12 sm:right-12"
 					aria-hidden
 				/>
-				<span className="text-[10px] font-medium uppercase tracking-wide opacity-0 transition-opacity group-hover:opacity-100 [@media(hover:none)]:opacity-100">
-					Add section
-				</span>
-			</button>
+				<Button
+					type="button"
+					variant="outline"
+					size="sm"
+					disabled={disabled}
+					aria-label="New section here"
+					className="pointer-events-none absolute left-1/2 top-1/2 z-10 h-7 -translate-x-1/2 -translate-y-1/2 gap-1 whitespace-nowrap rounded-md border-violet-300/70 px-2 text-xs font-medium text-violet-950 opacity-0 shadow-none transition-opacity delay-300 duration-200 ease-out hover:bg-violet-50 hover:text-accent-foreground group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 dark:border-violet-600 dark:text-violet-100 dark:hover:bg-violet-950/50 [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-90 disabled:pointer-events-none disabled:opacity-40"
+					onClick={() => onInsert()}
+				>
+					<LuPlus
+						className="h-3.5 w-3.5 shrink-0"
+						aria-hidden
+						strokeWidth={2}
+					/>
+					New section
+				</Button>
+			</div>
 		</div>
 	)
 }
@@ -2160,7 +2143,7 @@ function ChunkBlock({
 			aria-label="Note section"
 		>
 			<div className="pointer-events-none absolute right-2 top-1.5 z-10 flex justify-end gap-0.5 sm:right-3 sm:top-2">
-				<div className="pointer-events-none flex flex-wrap justify-end gap-0.5 rounded-md border border-border/60 bg-card/90 px-0.5 py-0.5 opacity-0 shadow-sm backdrop-blur-sm transition-opacity duration-150 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 dark:bg-card/80">
+				<div className="pointer-events-none flex flex-wrap justify-end gap-0.5 rounded-md border border-border/60 bg-card/90 px-0.5 py-0.5 opacity-0 shadow-sm backdrop-blur-sm transition-opacity delay-300 duration-200 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 dark:bg-card/80">
 					<Button
 						type="button"
 						variant="ghost"

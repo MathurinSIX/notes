@@ -3,17 +3,18 @@ import { startUpdateNotesWorkflow } from "@/api/workflow"
 import { ApiError } from "@/client"
 import { NextActionsHeaderLink } from "@/components/NextActionsHeaderLink"
 import { ProjectLogo } from "@/components/ProjectLogo"
-import SettingMenu from "@/components/SettingMenu"
 import { OpenUpdateNotesModalContext } from "@/components/UpdateNotesModalContext"
 import { WorkflowTopBarIndicator } from "@/components/WorkflowTopBarIndicator"
 import { Button } from "@/components/ui/button"
-import { useColorModeValue } from "@/components/ui/color-mode"
+import { ColorModeButton, useColorModeValue } from "@/components/ui/color-mode"
+import { logout } from "@/hooks/useAuth"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { ONGOING_WORKFLOW_RUNS_QUERY_KEY } from "@/lib/ongoingWorkflowRunsQuery"
 import { isPwaStandalone } from "@/lib/pwa"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useEffect, useMemo, useState } from "react"
+import { MdLogout } from "react-icons/md"
 
 interface HomeLayoutProps {
 	children: React.ReactNode
@@ -134,7 +135,19 @@ export function HomeLayout({ children }: HomeLayoutProps) {
 						>
 							Updates
 						</Link>
-						<SettingMenu />
+						<div className="flex shrink-0 items-center gap-2">
+							<ColorModeButton className="h-7 w-7 shrink-0" />
+							<Button
+								type="button"
+								variant="ghost"
+								size="icon"
+								className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
+								aria-label="Log out"
+								onClick={() => logout()}
+							>
+								<MdLogout className="h-4 w-4" />
+							</Button>
+						</div>
 					</div>
 				</header>
 				<main className="relative z-0 w-full min-w-0 overflow-x-clip">

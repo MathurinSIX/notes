@@ -78,3 +78,31 @@ export function dueInstantsEqual(
 	if (!ma.isValid() || !mb.isValid()) return false
 	return ma.valueOf() === mb.valueOf()
 }
+
+/** Next local calendar day at noon, as UTC ISO (quick reschedule from lists). */
+export function quickDueTomorrowIso(): string {
+	return moment()
+		.add(1, "day")
+		.hour(12)
+		.minute(0)
+		.second(0)
+		.millisecond(0)
+		.toISOString()
+}
+
+/**
+ * End of the current ISO week (Sunday 23:59:59.999 local).
+ * If that instant is not after now, use end of the following ISO week.
+ */
+export function quickDueEndOfThisWeekIso(): string {
+	let m = moment().endOf("isoWeek")
+	if (!m.isAfter(moment())) {
+		m = moment().add(1, "week").endOf("isoWeek")
+	}
+	return m.toISOString()
+}
+
+/** End of the ISO week that starts one week after the current week (Sunday end). */
+export function quickDueEndOfNextWeekIso(): string {
+	return moment().add(1, "week").endOf("isoWeek").toISOString()
+}

@@ -314,7 +314,7 @@ test("README screenshots", async ({ page, context }) => {
 		page.getByRole("heading", { name: "Change history" }),
 	).toBeHidden()
 
-	await page.getByRole("button", { name: "Incoming updates" }).click()
+	await page.getByRole("button", { name: "Sources" }).click()
 	await expect(
 		page.getByRole("heading", { name: "Incoming updates" }),
 	).toBeVisible()

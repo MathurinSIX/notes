@@ -2,27 +2,31 @@ import {
 	type NotesListItem,
 	type NotesNextAction,
 	listNotes,
+	patchNoteTask,
 } from "@/api/notes"
 import { ApiError } from "@/client"
 import { NOTES_NEXT_ACTIONS_HEADER_QUERY_KEY } from "@/components/NextActionsHeaderLink"
 import { HomeLayout } from "@/components/layouts/HomeLayout"
+import { TaskDuePostponeDropdown } from "@/components/TaskDuePostponeDropdown"
 import { ensureLoggedIn } from "@/hooks/useAuth"
-import {
-	formatDueAbsoluteTitle,
-	formatDueRelative,
-	isDueOverdue,
-	isDueWithinTwentyFourHours,
-} from "@/lib/dueDate"
 import { cn } from "@/lib/utils"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+	type Dispatch,
+	type SetStateAction,
+	useCallback,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react"
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router"
-import { useEffect, useMemo, useState } from "react"
 
 export const Route = createFileRoute("/")({
 	component: HomePage,
 })
 
-const HOME_RECENT_NOTES = 3
+const HOME_RECENT_NOTES = 6
 const HOME_NEXT_ACTIONS = 5
 
 const CARD_TOP_ACCENT = [
@@ -78,6 +82,59 @@ function HomePage() {
 		[data?.next_actions],
 	)
 
+	const [nextActionsActionError, setNextActionsActionError] = useState<
+		string | null
+	>(null)
+	const [duePatchingKey, setDuePatchingKey] = useState<string | null>(null)
+	const completingRef = useRef(new Set<string>())
+	const [completingKeys, setCompletingKeys] = useState(
+		() => new Set<string>(),
+	)
+
+	const afterDueReschedule = useCallback(async () => {
+		setNextActionsActionError(null)
+		await queryClient.invalidateQueries({
+			queryKey: ["homeDashboard"],
+		})
+		await queryClient.invalidateQueries({
+			queryKey: NOTES_NEXT_ACTIONS_HEADER_QUERY_KEY,
+		})
+	}, [queryClient])
+
+	const markNextActionDone = useCallback(
+		async (a: NotesNextAction) => {
+			const k = `${a.note_id}-${a.task_id}`
+			if (completingRef.current.has(k)) return
+			completingRef.current.add(k)
+			setCompletingKeys(new Set(completingRef.current))
+			setNextActionsActionError(null)
+			try {
+				await patchNoteTask(a.note_id, a.task_id, { done: true })
+				await queryClient.invalidateQueries({
+					queryKey: ["homeDashboard"],
+				})
+				await queryClient.invalidateQueries({
+					queryKey: NOTES_NEXT_ACTIONS_HEADER_QUERY_KEY,
+				})
+			} catch (e) {
+				let msg = "Could not mark follow-up done"
+				if (
+					e instanceof ApiError &&
+					e.body &&
+					typeof e.body === "object"
+				) {
+					const d = e.body as { detail?: unknown }
+					if (d.detail != null) msg = String(d.detail)
+				} else if (e instanceof Error) msg = e.message
+				setNextActionsActionError(msg)
+			} finally {
+				completingRef.current.delete(k)
+				setCompletingKeys(new Set(completingRef.current))
+			}
+		},
+		[queryClient],
+	)
+
 	const errMsg = error
 		? error instanceof ApiError &&
 			error.body &&
@@ -111,7 +168,7 @@ function HomePage() {
 				) : null}
 
 				<section
-					className="rounded-xl border border-teal-200/70 bg-gradient-to-br from-teal-50/90 via-card to-card p-4 shadow-sm dark:border-teal-800/50 dark:from-teal-950/40 dark:via-card dark:to-card"
+					className="rounded-xl border border-teal-200/70 bg-card p-4 shadow-sm dark:border-teal-800/50"
 					aria-label="Next actions"
 				>
 					<div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -125,6 +182,14 @@ function HomePage() {
 							View all actions
 						</Link>
 					</div>
+					{nextActionsActionError ? (
+						<p
+							role="alert"
+							className="mb-2 text-xs text-red-600 dark:text-red-400"
+						>
+							{nextActionsActionError}
+						</p>
+					) : null}
 					{loading ? (
 						<div className="h-24 animate-pulse rounded-lg border border-border bg-muted/40" />
 					) : nextActions.length === 0 ? (
@@ -140,9 +205,22 @@ function HomePage() {
 						</p>
 					) : (
 						<ol className="list-none space-y-2 p-0">
-							{nextActions.map((a: NotesNextAction) => (
-								<ActionPreviewRow key={`${a.note_id}-${a.task_id}`} a={a} />
-							))}
+							{nextActions.map((a: NotesNextAction) => {
+								const rowKey = `${a.note_id}-${a.task_id}`
+								return (
+									<ActionPreviewRow
+										key={rowKey}
+										a={a}
+										duePatchingKey={duePatchingKey}
+										rowKey={rowKey}
+										setDuePatchingKey={setDuePatchingKey}
+										completing={completingKeys.has(rowKey)}
+										onAfterDueReschedule={afterDueReschedule}
+										onDueError={setNextActionsActionError}
+										onMarkDone={() => void markNextActionDone(a)}
+									/>
+								)
+							})}
 						</ol>
 					)}
 				</section>
@@ -161,7 +239,7 @@ function HomePage() {
 					</div>
 					{loading ? (
 						<ul className="grid list-none grid-cols-1 gap-3 p-0 sm:grid-cols-3">
-							{Array.from({ length: 3 }).map((_, i) => (
+							{Array.from({ length: HOME_RECENT_NOTES }).map((_, i) => (
 								<li
 									key={i}
 									className="h-32 animate-pulse rounded-xl border border-border bg-muted/40"
@@ -222,46 +300,78 @@ function HomePage() {
 	)
 }
 
-function ActionPreviewRow({ a }: { a: NotesNextAction }) {
-	const dueLabel = formatDueRelative(a.due_at)
-	const dueTitle = formatDueAbsoluteTitle(a.due_at)
-	const overdue = isDueOverdue(a.due_at)
-	const dueSoon = isDueWithinTwentyFourHours(a.due_at)
+function ActionPreviewRow({
+	a,
+	onMarkDone,
+	rowKey,
+	duePatchingKey,
+	setDuePatchingKey,
+	completing,
+	onAfterDueReschedule,
+	onDueError,
+}: {
+	a: NotesNextAction
+	onMarkDone: () => void
+	rowKey: string
+	duePatchingKey: string | null
+	setDuePatchingKey: Dispatch<SetStateAction<string | null>>
+	completing: boolean
+	onAfterDueReschedule: () => void | Promise<void>
+	onDueError: (message: string) => void
+}) {
 	const noteTitle = a.note_title?.trim() || "Untitled"
+	const duePatching = duePatchingKey === rowKey
+	const rowBusy = completing || duePatching
 
 	return (
 		<li>
-			<Link
-				to="/notes/$noteId"
-				params={{ noteId: a.note_id }}
-				className="flex flex-col gap-1 rounded-lg border border-transparent px-2 py-2 transition-colors hover:border-border hover:bg-muted/30 sm:flex-row sm:items-center sm:justify-between sm:gap-3"
-			>
-				<div className="min-w-0 flex-1">
-					<p className="text-sm font-medium leading-snug text-foreground">
-						{a.task_title}
-					</p>
-					<p className="mt-0.5 truncate text-xs text-muted-foreground">
-						<span className="text-muted-foreground/80">Note</span> · {noteTitle}
-					</p>
-				</div>
-				{dueLabel ? (
-					<span
-						title={dueTitle ?? undefined}
-						className={cn(
-							"shrink-0 self-start rounded-md border px-2 py-1 text-xs font-semibold sm:self-auto",
-							overdue
-								? "border-amber-400/45 bg-amber-500/15 text-amber-950 dark:border-amber-700/40 dark:bg-amber-950/30 dark:text-amber-50"
-								: dueSoon
-									? "border-red-400/50 bg-red-500/15 text-red-950 dark:border-red-700/50 dark:bg-red-950/35 dark:text-red-50"
-									: "border-border bg-muted/70 text-foreground",
-						)}
-					>
-						Due {dueLabel}
-					</span>
-				) : (
-					<span className="shrink-0 text-xs text-muted-foreground">No due date</span>
+			<div
+				className={cn(
+					"flex flex-col gap-2 rounded-lg border border-transparent px-2 py-2 transition-colors hover:border-border hover:bg-muted/30 sm:flex-row sm:items-start sm:gap-3",
+					rowBusy && "pointer-events-none opacity-60",
 				)}
-			</Link>
+			>
+				<input
+					type="checkbox"
+					className="mt-0.5 h-4 w-4 shrink-0 rounded border-input sm:mt-0"
+					checked={false}
+					disabled={rowBusy}
+					aria-label={`Mark done: ${a.task_title}`}
+					onChange={onMarkDone}
+				/>
+				<div className="flex min-w-0 flex-1 flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+					<Link
+						to="/notes/$noteId"
+						params={{ noteId: a.note_id }}
+						className="min-w-0 flex-1 rounded-md outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+					>
+						<p className="text-sm font-medium leading-snug text-foreground">
+							{a.task_title}
+						</p>
+						<p className="mt-0.5 truncate text-xs text-muted-foreground">
+							<span className="text-muted-foreground/80">Note</span> ·{" "}
+							{noteTitle}
+						</p>
+					</Link>
+					<TaskDuePostponeDropdown
+						noteId={a.note_id}
+						taskId={a.task_id}
+						dueAt={a.due_at}
+						density="compact"
+						variant="open"
+						disabled={rowBusy}
+						onPatchingChange={(v) => {
+							if (v) setDuePatchingKey(rowKey)
+							else
+								setDuePatchingKey((k) => (k === rowKey ? null : k))
+						}}
+						onError={onDueError}
+						onPatched={async () => {
+							await onAfterDueReschedule()
+						}}
+					/>
+				</div>
+			</div>
 		</li>
 	)
 }
