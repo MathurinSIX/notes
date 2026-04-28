@@ -5,7 +5,34 @@
 		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 		<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-		<meta name="theme-color" content="#1e63eb" />
+		<script>
+			(function () {
+				var KEY = "theme";
+				var DARK = "#020817";
+				var LIGHT = "#ffffff";
+				function systemPref() {
+					return window.matchMedia("(prefers-color-scheme: dark)").matches
+						? "dark"
+						: "light";
+				}
+				var stored;
+				try {
+					stored = localStorage.getItem(KEY);
+				} catch (e) {}
+				var resolved =
+					stored === "light" || stored === "dark"
+						? stored
+						: systemPref();
+				var m = document.createElement("meta");
+				m.id = "pwa-theme-color";
+				m.setAttribute("name", "theme-color");
+				m.setAttribute(
+					"content",
+					resolved === "dark" ? DARK : LIGHT,
+				);
+				document.head.appendChild(m);
+			})();
+		</script>
 		<meta name="mobile-web-app-capable" content="yes" />
 		<meta name="apple-mobile-web-app-capable" content="yes" />
 		<meta

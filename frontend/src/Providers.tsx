@@ -1,4 +1,5 @@
 import { OpenAPI } from "@/client"
+import { ThemeColorSync } from "@/components/ThemeColorSync"
 import { Toaster } from "@/components/ui/toaster"
 import { setup401Interceptor } from "@/config/apiSetup"
 import { getApiUrl } from "@/config/backendConfig"
@@ -31,6 +32,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
 	return (
 		<ThemeProvider attribute="class" disableTransitionOnChange>
+			<ThemeColorSync />
 			<QueryClientProvider client={queryClient}>
 				{children}
 				<Toaster />

@@ -3,6 +3,7 @@ import { tanstackRouter } from "@tanstack/router-plugin/vite"
 import react from "@vitejs/plugin-react"
 import { defineConfig } from "vite"
 import { VitePWA } from "vite-plugin-pwa"
+import { THEME_COLOR_DARK } from "./src/lib/themeChrome"
 
 export default defineConfig({
 	plugins: [
@@ -25,8 +26,8 @@ export default defineConfig({
 				name: "Notes",
 				short_name: "Notes",
 				description: "Capture and organize your notes",
-				theme_color: "#1e63eb",
-				background_color: "#0b1220",
+				theme_color: THEME_COLOR_DARK,
+				background_color: THEME_COLOR_DARK,
 				display: "standalone",
 				scope: "/",
 				start_url: "/",
