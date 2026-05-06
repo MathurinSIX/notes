@@ -81,8 +81,8 @@ import {
 } from "react"
 import {
 	LuArchive,
-	LuChevronDown,
-	LuChevronUp,
+	LuArrowDown,
+	LuArrowUp,
 	LuGripVertical,
 	LuPencil,
 	LuPlus,
@@ -396,6 +396,7 @@ function NoteDetailPage() {
 	const [editingTaskId, setEditingTaskId] = useState<string | null>(null)
 	const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null)
 	const [taskReorderBusy, setTaskReorderBusy] = useState(false)
+	const [chunkReorderBusy, setChunkReorderBusy] = useState(false)
 	const [taskEditTitle, setTaskEditTitle] = useState("")
 	const [taskEditDueLocal, setTaskEditDueLocal] = useState("")
 	const [hadOngoingWorkflows, setHadOngoingWorkflows] = useState(false)
@@ -872,6 +873,51 @@ function NoteDetailPage() {
 		[noteId, load],
 	)
 
+	const moveChunk = useCallback(
+		async (chunkId: string, direction: -1 | 1) => {
+			if (!note || chunkReorderBusy) return
+			const sortedAll = sortNoteChunks(note.chunks)
+			const oldIndex = sortedAll.findIndex((c) => c.id === chunkId)
+			if (oldIndex < 0) return
+			const newIndex = oldIndex + direction
+			if (newIndex < 0 || newIndex >= sortedAll.length) return
+
+			const reordered = arrayMove(sortedAll, oldIndex, newIndex)
+			const patches = reordered
+				.map((c, i) => ({ id: c.id, sort_order: i }))
+				.filter(({ id, sort_order }) => {
+					const orig = sortedAll.find((x) => x.id === id)
+					return orig != null && orig.sort_order !== sort_order
+				})
+			if (patches.length === 0) return
+
+			setChunkReorderBusy(true)
+			setError(null)
+			try {
+				await Promise.all(
+					patches.map((p) =>
+						updateChunk(p.id, { sort_order: p.sort_order }),
+					),
+				)
+				await load()
+			} catch (e) {
+				let msg = "Could not reorder sections"
+				if (
+					e instanceof ApiError &&
+					e.body &&
+					typeof e.body === "object"
+				) {
+					const d = e.body as { detail?: unknown }
+					if (d.detail) msg = String(d.detail)
+				} else if (e instanceof Error) msg = e.message
+				setError(msg)
+			} finally {
+				setChunkReorderBusy(false)
+			}
+		},
+		[note, chunkReorderBusy, load],
+	)
+
 	const removeChunk = async (c: ChunkOut) => {
 		if (!note) return
 		if (!window.confirm("Delete this section?")) return
@@ -967,27 +1013,6 @@ function NoteDetailPage() {
 		[note, openFollowUps, commitOpenTaskOrder],
 	)
 
-	const nudgeOpenTaskInDueBucket = useCallback(
-		async (t: NoteTaskOut, delta: -1 | 1) => {
-			if (!note) return
-			const bucketKey = dueBucketKey(t)
-			const bucket = openFollowUps.filter(
-				(x) => dueBucketKey(x) === bucketKey,
-			)
-			const idx = bucket.findIndex((x) => x.id === t.id)
-			const j = idx + delta
-			if (idx < 0 || j < 0 || j >= bucket.length) return
-			const ids = bucket.map((x) => x.id)
-			const nextBucket = arrayMove(ids, idx, j)
-			const newOpenIds = buildNewOpenIdsAfterBucketReorder(
-				openFollowUps,
-				bucketKey,
-				nextBucket,
-			)
-			await commitOpenTaskOrder(newOpenIds)
-		},
-		[note, openFollowUps, commitOpenTaskOrder],
-	)
 
 	useEffect(() => {
 		setTaskOpenGroupSkip((s) =>
@@ -1578,10 +1603,8 @@ function NoteDetailPage() {
 										</h2>
 										<p className="mt-0.5 text-xs text-muted-foreground">
 											Sorted by due date, then manual order
-											within the same due. Drag the grip or
-											use arrows to reorder; arrows work
-											across pages. Only the checkbox marks
-											done.
+											within the same due. Drag the grip to
+											reorder. Only the checkbox marks done.
 										</p>
 									</div>
 									{doneFollowUps.length > 0 ? (
@@ -1662,12 +1685,6 @@ function NoteDetailPage() {
 																			const taskBusy =
 																				deletingTaskId ===
 																				t.id
-																			const bucketIdx =
-																				group.tasks.findIndex(
-																					(x) =>
-																						x.id ===
-																						t.id,
-																				)
 																			const sortDisabled =
 																				!!editingTaskId ||
 																				taskReorderBusy ||
@@ -1831,59 +1848,6 @@ function NoteDetailPage() {
 																										>
 																											<LuGripVertical className="h-3.5 w-3.5" />
 																										</button>
-																										{group.tasks
-																											.length >
-																										1 ? (
-																											<>
-																												<Button
-																													type="button"
-																													variant="ghost"
-																													size="icon"
-																													className="h-7 w-7 shrink-0 text-muted-foreground"
-																													aria-label="Move earlier for this due date"
-																													title="Move earlier (same due)"
-																													disabled={
-																														sortDisabled ||
-																														taskBusy ||
-																														bucketIdx <=
-																															0
-																													}
-																													onClick={() =>
-																														void nudgeOpenTaskInDueBucket(
-																															t,
-																															-1,
-																														)
-																													}
-																												>
-																													<LuChevronUp className="h-3.5 w-3.5" />
-																												</Button>
-																												<Button
-																													type="button"
-																													variant="ghost"
-																													size="icon"
-																													className="h-7 w-7 shrink-0 text-muted-foreground"
-																													aria-label="Move later for this due date"
-																													title="Move later (same due)"
-																													disabled={
-																														sortDisabled ||
-																														taskBusy ||
-																														bucketIdx >=
-																															group
-																																.tasks
-																																.length -
-																																1
-																													}
-																													onClick={() =>
-																														void nudgeOpenTaskInDueBucket(
-																															t,
-																															1,
-																														)
-																													}
-																												>
-																													<LuChevronDown className="h-3.5 w-3.5" />
-																												</Button>
-																											</>
-																										) : null}
 																										<input
 																											id={`task-open-${t.id}`}
 																											type="checkbox"
@@ -2386,6 +2350,18 @@ function NoteDetailPage() {
 											}
 											chunk={c}
 											isEditing={editingChunkId === c.id}
+											canMoveUp={chunkIndex > 0}
+											canMoveDown={
+												chunkIndex <
+												sortedChunks.length - 1
+											}
+											moveDisabled={chunkReorderBusy}
+											onMoveUp={() =>
+												void moveChunk(c.id, -1)
+											}
+											onMoveDown={() =>
+												void moveChunk(c.id, 1)
+											}
 											onStartEdit={() => {
 												setEditingTitle(false)
 												setEditingChunkId(c.id)
@@ -2713,6 +2689,11 @@ function ChunkBlock({
 	accentClassName,
 	chunk,
 	isEditing,
+	canMoveUp,
+	canMoveDown,
+	moveDisabled,
+	onMoveUp,
+	onMoveDown,
 	onStartEdit,
 	onCancelEdit,
 	onSave,
@@ -2724,6 +2705,11 @@ function ChunkBlock({
 	accentClassName: string
 	chunk: ChunkOut
 	isEditing: boolean
+	canMoveUp: boolean
+	canMoveDown: boolean
+	moveDisabled?: boolean
+	onMoveUp: () => void
+	onMoveDown: () => void
 	onStartEdit: () => void
 	onCancelEdit: () => void
 	onSave: (md: string) => void
@@ -2742,10 +2728,10 @@ function ChunkBlock({
 	if (isEditing) {
 		return (
 			<article
-				className="scroll-mt-20 rounded-xl border border-sky-200/80 bg-gradient-to-br from-sky-50/50 via-card to-card p-3 shadow-md transition-colors duration-150 hover:from-sky-50/70 dark:border-sky-800/70 dark:from-sky-950/35 dark:via-card dark:to-card"
+				className="scroll-mt-20 flex min-h-[calc(100dvh-3.5rem)] flex-col gap-0 rounded-xl border border-sky-200/80 bg-gradient-to-br from-sky-50/50 via-card to-card p-3 shadow-md transition-colors duration-150 hover:from-sky-50/70 dark:border-sky-800/70 dark:from-sky-950/35 dark:via-card dark:to-card"
 				aria-label="Edit section"
 			>
-				<div className="mb-1.5 flex flex-wrap items-center justify-end gap-1">
+				<div className="mb-1.5 flex shrink-0 flex-wrap items-center justify-end gap-1">
 					<Button
 						type="button"
 						variant="outline"
@@ -2766,14 +2752,16 @@ function ChunkBlock({
 						</Button>
 					) : null}
 				</div>
-				<MarkdownEditor
-					variant="chunk"
-					value={draft}
-					onChange={setDraft}
-					preview="edit"
-					className="w-full"
-				/>
-				<div className="mt-3 flex flex-wrap gap-2">
+				<div className="flex min-h-0 flex-1 flex-col">
+					<MarkdownEditor
+						variant="chunk"
+						value={draft}
+						onChange={setDraft}
+						preview="edit"
+						className="w-full min-h-0 flex-1"
+					/>
+				</div>
+				<div className="mt-3 flex shrink-0 flex-wrap gap-2">
 					<Button
 						type="button"
 						size="sm"
@@ -2833,6 +2821,30 @@ function ChunkBlock({
 							View update
 						</Button>
 					) : null}
+					<Button
+						type="button"
+						variant="ghost"
+						size="icon"
+						className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+						onClick={onMoveUp}
+						disabled={moveDisabled || !canMoveUp}
+						aria-label="Move section up"
+						title="Move section up"
+					>
+						<LuArrowUp className="h-3.5 w-3.5" />
+					</Button>
+					<Button
+						type="button"
+						variant="ghost"
+						size="icon"
+						className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+						onClick={onMoveDown}
+						disabled={moveDisabled || !canMoveDown}
+						aria-label="Move section down"
+						title="Move section down"
+					>
+						<LuArrowDown className="h-3.5 w-3.5" />
+					</Button>
 					<Button
 						type="button"
 						variant="ghost"

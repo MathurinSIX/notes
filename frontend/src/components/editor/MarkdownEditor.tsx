@@ -14,7 +14,6 @@ import {
 	useRef,
 	useState,
 	type ClipboardEvent,
-	type CSSProperties,
 } from "react"
 
 /** Must stay in sync with backend `NOTE_PASTE_IMAGE_MAX_BYTES` default. */
@@ -99,10 +98,6 @@ async function dataImageUrlToFile(dataUrl: string): Promise<File> {
 
 export type MarkdownEditorVariant = "chunk"
 
-const heights: Record<MarkdownEditorVariant, CSSProperties["height"]> = {
-	chunk: 300,
-}
-
 type MarkdownEditorProps = {
 	value: string
 	onChange: (value: string) => void
@@ -110,9 +105,19 @@ type MarkdownEditorProps = {
 	id?: string
 	preview?: "edit" | "live" | "preview"
 	className?: string
+	/**
+	 * Pixel height of the editor (passed to @uiw/react-md-editor). When omitted, the editor
+	 * stretches to the height of its parent — put the parent in a flex column with `min-h-0 flex-1`.
+	 */
+	height?: number
 	/** When true, the editor is read-only (e.g. while a form is submitting). */
 	disabled?: boolean
 	placeholder?: string
+	/**
+	 * Prism overlay behind a transparent textarea — any font/line-height mismatch breaks caret and selection.
+	 * Default off for reliable editing; set true only if you need live syntax colors in the source pane.
+	 */
+	highlightEnable?: boolean
 }
 
 export function MarkdownEditor({
@@ -124,7 +129,11 @@ export function MarkdownEditor({
 	className,
 	disabled = false,
 	placeholder,
+	highlightEnable = false,
+	height: heightProp,
 }: MarkdownEditorProps) {
+	const editorHeight: number | "100%" =
+		heightProp !== undefined ? heightProp : "100%"
 	const { resolvedTheme } = useTheme()
 	const colorMode: "light" | "dark" =
 		resolvedTheme === "dark" ? "dark" : "light"
@@ -191,7 +200,12 @@ export function MarkdownEditor({
 		(e: ClipboardEvent<HTMLDivElement>) => {
 			const t = e.target
 			if (!(t instanceof HTMLTextAreaElement)) return
-			if (!t.classList.contains("w-md-editor-text-input")) return
+			if (
+				!t.classList.contains("w-md-editor-text-input") &&
+				t.dataset.markdownEditorInput !== "true"
+			) {
+				return
+			}
 
 			const file = firstImageFromClipboard(e.clipboardData)
 			if (file) {
@@ -266,33 +280,52 @@ export function MarkdownEditor({
 	return (
 		<div
 			className={cn(
-				"markdown-editor-shell relative overflow-hidden rounded-md border border-input bg-background text-foreground",
-				"[&_.w-md-editor]:bg-transparent [&_.w-md-editor-toolbar]:border-border [&_.w-md-editor-toolbar]:bg-muted/40",
-				"[&_.w-md-editor-content]:bg-background",
-				variant === "chunk" &&
-					"[&_textarea.w-md-editor-text-input]:text-sm [&_textarea.w-md-editor-text-input]:leading-relaxed [&_.wmde-markdown]:text-sm [&_.wmde-markdown]:leading-snug",
+				"markdown-editor-shell relative flex flex-col overflow-hidden rounded-md border border-input bg-background text-foreground",
+				heightProp === undefined
+					? "min-h-0 flex-1"
+					: "min-h-[16rem]",
+				"[&_.w-md-editor]:flex [&_.w-md-editor]:min-h-0 [&_.w-md-editor]:flex-1 [&_.w-md-editor]:flex-col [&_.w-md-editor]:bg-transparent [&_.w-md-editor-toolbar]:shrink-0 [&_.w-md-editor-toolbar]:border-border [&_.w-md-editor-toolbar]:bg-muted/40",
+				"[&_.w-md-editor-content]:min-h-0 [&_.w-md-editor-content]:flex-1 [&_.w-md-editor-content]:bg-background",
+				"[&_.w-md-editor-area]:min-h-0 [&_.w-md-editor-area]:flex-1 [&_.w-md-editor-area]:!h-full",
+				// Library defaults minHeight to 100 (px) on .w-md-editor-text via inline style — beats flex layout; override so the textarea can fill the shell.
+				"[&_.w-md-editor-text]:!h-full [&_.w-md-editor-text]:!min-h-full",
+				"[&_textarea.w-md-editor-text-input]:!h-full",
 				disabled && "pointer-events-none opacity-60",
 				className,
 			)}
 			onPasteCapture={disabled ? undefined : onPasteCapture}
 			aria-busy={imagePasteLoading}
 		>
-			<MDEditor
-				value={value}
-				onChange={(v) => onChange(v ?? "")}
-				height={heights[variant]}
-				preview={preview}
-				visibleDragbar={variant !== "chunk"}
-				data-color-mode={colorMode}
-				previewOptions={{ components: authMarkdownImageComponents }}
-				textareaProps={{
-					id,
-					spellCheck: true,
-					readOnly: disabled,
-					...(placeholder ? { placeholder } : {}),
-				}}
-				enableScroll
-			/>
+			{preview === "edit" ? (
+				<textarea
+					id={id}
+					value={value}
+					onChange={(e) => onChange(e.target.value)}
+					spellCheck
+					readOnly={disabled}
+					placeholder={placeholder}
+					data-markdown-editor-input="true"
+					className="min-h-0 flex-1 resize-none overflow-auto border-0 bg-transparent p-3 font-sans text-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground"
+				/>
+			) : (
+				<MDEditor
+					value={value}
+					onChange={(v) => onChange(v ?? "")}
+					height={editorHeight}
+					preview={preview}
+					highlightEnable={highlightEnable}
+					visibleDragbar={variant !== "chunk"}
+					data-color-mode={colorMode}
+					previewOptions={{ components: authMarkdownImageComponents }}
+					textareaProps={{
+						id,
+						spellCheck: true,
+						readOnly: disabled,
+						...(placeholder ? { placeholder } : {}),
+					}}
+					enableScroll
+				/>
+			)}
 			{imagePasteLoading ? (
 				<div
 					className="pointer-events-auto absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-background/75 text-muted-foreground backdrop-blur-[1px]"

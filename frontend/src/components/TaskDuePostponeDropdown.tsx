@@ -24,7 +24,14 @@ export type TaskDuePostponeDensity = "compact" | "comfortable"
 
 export type TaskDuePostponeVariant = "open" | "done"
 
-function toneClasses(overdue: boolean, dueSoon: boolean): string {
+function toneClasses(
+	overdue: boolean,
+	dueSoon: boolean,
+	variant: TaskDuePostponeVariant,
+): string {
+	if (variant === "done") {
+		return "border-border bg-muted/70 font-semibold text-muted-foreground shadow-none ring-0 dark:border-border"
+	}
 	if (overdue) {
 		return "border-amber-500 bg-amber-500/30 text-amber-950 ring-2 ring-amber-500/35 dark:border-amber-500 dark:bg-amber-500/25 dark:text-amber-50 dark:ring-amber-400/40"
 	}
@@ -124,7 +131,7 @@ export function TaskDuePostponeDropdown({
 			? "Reschedule"
 			: "Set due date"
 
-	const tone = hasDue ? toneClasses(overdue, dueSoon) : ""
+	const tone = hasDue ? toneClasses(overdue, dueSoon, variant) : ""
 	const size = sizeClasses(density)
 
 	return (
